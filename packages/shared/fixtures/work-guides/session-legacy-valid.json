@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1",
+  "sessionId": "demo-session-1",
+  "releaseId": "demo-release-1",
+  "status": "active",
+  "stepIndex": 0,
+  "revision": 0,
+  "steps": [
+    {
+      "stepId": "demo-step-1",
+      "imageAssetId": "demo-image-1",
+      "text": "タオルを ひろげます",
+      "visibleCaution": "机の上で行います",
+      "order": 1
+    }
+  ]
+}

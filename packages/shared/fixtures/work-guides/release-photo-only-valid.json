@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1",
+  "releaseId": "demo-release-1",
+  "taskId": "demo-task-1",
+  "learnerId": "fictional-learner-1",
+  "sourceDraftId": "demo-draft-1",
+  "sourceRevision": 1,
+  "appliedSupportRecordRefs": [],
+  "version": 1,
+  "displayMode": "photo_only",
+  "audioGuidance": false,
+  "learnerSteps": [
+    {
+      "stepId": "demo-step-1",
+      "imageAssetId": "demo-image-1",
+      "imageAltText": "机に広げた架空のタオル",
+      "text": "タオルを ひろげます",
+      "visibleCaution": "机の上で行います",
+      "order": 1
+    }
+  ],
+  "staffGuide": [
+    {
+      "stepId": "demo-step-1",
+      "sourceStartMs": 0,
+      "sourceEndMs": 1000,
+      "verifiedObservation": "タオルを広げる",
+      "verifiedSpeech": "ひろげよう",
+      "coaching": "端を指します",
+      "completionCheck": "全体が見える"
+    }
+  ],
+  "approvedBy": "fictional-staff-1",
+  "approvedAt": "2026-11-08T00:00:00Z",
+  "contentHash": "fictional-content-hash"
+}

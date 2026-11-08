@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1",
+  "revision": 1,
+  "reviewChecks": {
+    "presentationConfirmed": false,
+    "flagResolution": "",
+    "steps": {
+      "demo-step-1": {
+        "videoVerified": false,
+        "photoTextVerified": false
+      }
+    }
+  }
+}
