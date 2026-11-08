@@ -3,6 +3,7 @@ import { uploadVideo } from './upload.ts';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, draftPatchSchema, sessionStartSchema, type Member, type LearnerSessionDTO } from '../../../packages/shared/src/index.ts';
+import { learnerProfileCreateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
 import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
 import { media } from './media.ts';
@@ -13,6 +14,15 @@ export class HttpError extends Error {
 }
 export function fail(status: number, code: string): never {
     throw new HttpError(status, code);
+}
+function learnerProfileDetail(d: Doc) {
+    return learnerProfileDetailSchema.parse({
+        schemaVersion: '1', learnerId: d.id, orgId: d.orgId, displayName: d.displayName,
+        preferences: d.preferences ?? {}, revision: d.revision ?? 1,
+        enteredBy: d.enteredBy, updatedBy: d.updatedBy ?? d.enteredBy, createdAt: d.createdAt,
+        ...Object.fromEntries(['learnerWishes', 'staffObservations', 'staffSuggestions', 'confirmedGuidance', 'disabilityInfo']
+            .filter(key => d[key] !== undefined).map(key => [key, d[key]]))
+    });
 }
 export function createApp(options: {
     tts?: TtsAdapter;
@@ -125,9 +135,23 @@ export function createApp(options: {
         });
         send(res, { assetId: a.id, status: 'ready' });
     });
+    api.post('/learners', async (req, res) => {
+        staff(res);
+        const input = learnerProfileCreateRequestSchema.parse(req.body);
+        const m = member(res);
+        const learner = doc(m.orgId, { ...input, preferences: input.preferences ?? {}, enteredBy: m.uid, updatedBy: m.uid, revision: 1 });
+        const detail = learnerProfileDetail(learner);
+        await db.put('learners', learner);
+        res.status(201).json(detail);
+    });
     api.get('/learners', async (req, res) => {
         staff(res);
-        send(res, { learners: await list('learners', res) });
+        const items = (await list('learners', res)).map(d => toLearnerProfileSummary(learnerProfileDetail(d)));
+        res.json(learnerProfileListResponseSchema.parse({ items }));
+    });
+    api.get('/learners/:id', async (req, res) => {
+        staff(res);
+        res.json(learnerProfileDetail(await get('learners', req.params.id, res)));
     });
     api.patch('/learners/:id', async (req, res) => {
         staff(res);

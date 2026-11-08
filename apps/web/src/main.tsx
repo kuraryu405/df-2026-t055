@@ -83,7 +83,7 @@ function Staff({ path, action }: {
     useEffect(() => {
         void action(async () => {
             setTasks((await api('/tasks')).tasks);
-            setLearners((await api('/learners')).learners);
+            setLearners((await api('/learners')).items);
         });
     }, [path]);
     const draftMatch = path.match(/\/drafts\/([^/]+)/);
@@ -103,7 +103,7 @@ function Staff({ path, action }: {
                 finally {
                     setBusy(false);
                 }
-            })}>{busy ? '動画を検査しています…' : '動画を登録する'}</button></section> : <><h1>職員の作業一覧</h1><label>本人プロフィール<select value={chosen} onChange={e => setChosen(e.target.value)}>{learners.map(l => <option key={l.id} value={l.id}>{l.displayName}：{l.preferences.splitHints}</option>)}</select></label>{tasks.length === 0 && <p>「手本を登録」から動画を登録してください。</p>}{tasks.map(t => <section key={t.id}><h2>{t.title}</h2><p>{t.status === 'ready' ? '動画登録済み' : '動画の登録待ち'}</p>{t.videoAssetId && <Asset id={t.videoAssetId} video/>}{t.generationJobs?.map((j: any) => <p key={j.jobId}>生成状態：{j.status} <button onClick={() => go(`/staff/tasks/${t.id}/drafts/${j.draftId}`)}>下書きを開く</button></p>)}<button disabled={t.status !== 'ready' || busy} onClick={() => void action(async () => {
+            })}>{busy ? '動画を検査しています…' : '動画を登録する'}</button></section> : <><h1>職員の作業一覧</h1><label>本人プロフィール<select value={chosen} onChange={e => setChosen(e.target.value)}>{learners.map(l => <option key={l.learnerId} value={l.learnerId}>{l.displayName}：{l.preferences.splitHints}</option>)}</select></label>{tasks.length === 0 && <p>「手本を登録」から動画を登録してください。</p>}{tasks.map(t => <section key={t.id}><h2>{t.title}</h2><p>{t.status === 'ready' ? '動画登録済み' : '動画の登録待ち'}</p>{t.videoAssetId && <Asset id={t.videoAssetId} video/>}{t.generationJobs?.map((j: any) => <p key={j.jobId}>生成状態：{j.status} <button onClick={() => go(`/staff/tasks/${t.id}/drafts/${j.draftId}`)}>下書きを開く</button></p>)}<button disabled={t.status !== 'ready' || busy} onClick={() => void action(async () => {
                     setBusy(true);
                     try {
                         const r = await api(`/tasks/${t.id}/generations`, 'POST', { learnerId: chosen });
