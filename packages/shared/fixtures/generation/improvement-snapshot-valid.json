@@ -1,0 +1,23 @@
+{
+  "taskId": "task-demo",
+  "learnerId": "learner-demo",
+  "sourceReleaseId": "release-demo",
+  "sourceReleaseVersion": 1,
+  "supportInputs": [
+    {
+      "recordId": "record-demo-1",
+      "revision": 1,
+      "summary": "赤い線を目印にする説明を候補にする。"
+    }
+  ],
+  "correctionRefs": [
+    {
+      "correctionId": "correction-demo",
+      "draftRevision": 2
+    }
+  ],
+  "displayMode": "photo_text",
+  "confirmedGuidance": [
+    "目印を具体的に示す"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1",
+  "jobId": "job-demo",
+  "draftId": "draft-demo",
+  "kind": "guide",
+  "status": "queued"
+}

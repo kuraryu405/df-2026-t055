@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1",
+  "jobId": "job-demo",
+  "draftId": "draft-demo",
+  "taskId": "task-demo",
+  "kind": "correction_context",
+  "status": "queued",
+  "attempt": 0,
+  "modelId": "model-demo",
+  "promptVersion": "1",
+  "inputSnapshot": {
+    "correctionId": "correction-demo",
+    "draftRevision": 2,
+    "title": "タオルの包装",
+    "changes": [
+      {
+        "stepId": "s01",
+        "field": "text",
+        "before": "はしをそろえる",
+        "after": "赤い線にあわせる"
+      }
+    ]
+  }
+}

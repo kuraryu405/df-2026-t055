@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "GENERATION_CONFLICT",
+    "message": "選択した記録を確認し直してください。",
+    "requestId": "request-demo"
+  }
+}

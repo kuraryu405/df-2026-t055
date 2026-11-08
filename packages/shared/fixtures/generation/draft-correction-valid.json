@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1",
+  "correctionId": "correction-demo",
+  "taskId": "task-demo",
+  "learnerId": "learner-demo",
+  "draftId": "draft-demo",
+  "draftRevision": 2,
+  "changes": [
+    {
+      "stepId": "s01",
+      "field": "text",
+      "before": "はしをそろえる",
+      "after": "赤い線にあわせる"
+    }
+  ],
+  "reason": "説明の目印を明確にするため",
+  "createdBy": "staff-demo",
+  "createdAt": "2026-11-08T00:00:00Z",
+  "contextJobId": "context-job-demo",
+  "contextSummary": {
+    "editSummary": "工程文を赤い線を目印にする表現へ変更した。",
+    "nextDraftHint": "写真に写った具体的な目印を使う表現を候補にする。",
+    "reviewFlags": []
+  }
+}
