@@ -4,5 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "node --experimental-transform-types --watch src/server.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^3.0.0"
   }
 }
