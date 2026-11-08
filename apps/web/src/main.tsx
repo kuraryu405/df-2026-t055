@@ -1,3 +1,4 @@
+import { StaffLearners } from './staff-learners.tsx';
 import { createTokenProvider } from './auth.ts';
 import { subscribeSupport } from './support-ws.ts';
 import { staffSupportNotificationSchema, learnerSupportNotificationSchema } from '../../../packages/shared/src/support.ts';
@@ -95,7 +96,7 @@ function Staff({ path, action }: {
         return <Draft key={draftMatch[1]} id={draftMatch[1]} action={action}/>;
     if (path === '/staff/support')
         return <Support action={action}/>;
-    return <><nav><button onClick={() => go('/staff')}>作業一覧</button><button onClick={() => go('/staff/tasks/new')}>＋ 手本を登録</button><button onClick={() => go('/staff/support')}>支援要求</button><button onClick={() => go('/staff/handover')}>承認版を確認・割当</button></nav>{path.startsWith('/staff/handover') ? <Handover path={path.replace('/staff', '')} action={action} staff/> : path === '/staff/tasks/new' ? <section><h1>手本動画を登録</h1><label>作業名<input value={title} onChange={e => setTitle(e.target.value)}/></label><label>MP4（音声付き・50MB / 180秒以内）<input type="file" accept="video/mp4" onChange={e => setFile(e.target.files?.[0] ?? null)}/></label><button disabled={!file || busy} onClick={() => void action(async () => {
+    return <><nav><button onClick={() => go('/staff')}>作業一覧</button><button onClick={() => go('/staff/learners')}>本人一覧・登録</button><button onClick={() => go('/staff/tasks/new')}>＋ 手本を登録</button><button onClick={() => go('/staff/support')}>支援要求</button><button onClick={() => go('/staff/handover')}>承認版を確認・割当</button></nav>{path === '/staff/learners' || path.startsWith('/staff/learners/') ? <StaffLearners key={path} path={path} api={api} go={go}/> : path.startsWith('/staff/handover') ? <Handover path={path.replace('/staff', '')} action={action} staff/> : path === '/staff/tasks/new' ? <section><h1>手本動画を登録</h1><label>作業名<input value={title} onChange={e => setTitle(e.target.value)}/></label><label>MP4（音声付き・50MB / 180秒以内）<input type="file" accept="video/mp4" onChange={e => setFile(e.target.files?.[0] ?? null)}/></label><button disabled={!file || busy} onClick={() => void action(async () => {
                 setBusy(true);
                 try {
                     const { taskId } = await api('/tasks', 'POST', { title });
