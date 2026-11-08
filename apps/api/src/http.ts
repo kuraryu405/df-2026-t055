@@ -38,6 +38,7 @@ type Route = {
 };
 export class Router {
     routes: Route[] = [];
+    upgrade?: (req: IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) => void;
     use(path: string | Handler | ErrorHandler | Router, ...handlers: (Handler | ErrorHandler | Router)[]) {
         if (typeof path !== 'string')
             handlers.unshift(path);
@@ -223,6 +224,9 @@ export class Router {
                         output.writeHead(500).end();
                 }
             }
+        }).on('upgrade', (req, socket, head) => {
+            if (this.upgrade) this.upgrade(req, socket, head);
+            else socket.destroy();
         }).listen(port, host, callback);
     }
 }

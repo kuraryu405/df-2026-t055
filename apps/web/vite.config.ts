@@ -1,1 +1,1 @@
-export default ({ server: { proxy: { '/api': 'http://127.0.0.1:3001' } }, build: { outDir: 'dist' } });
+export default ({ server: { proxy: { '/api': { target: 'http://127.0.0.1:3001', ws: true } } }, build: { outDir: 'dist' } });

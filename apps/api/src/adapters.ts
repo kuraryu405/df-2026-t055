@@ -92,13 +92,15 @@ export class LocalStorage implements Storage {
     }
 }
 export interface Auth {
-    verify(token: string): Promise<Member | undefined>;
+    verify(token: string): Promise<(Member & { expiresAt?: number }) | undefined>;
 }
 export class DemoAuth implements Auth {
     constructor(private db: Repository) {
     }
     async verify(t: string) {
-        return await this.db.get('members', t) as Member | undefined;
+        const member = await this.db.get('members', t) as Member | undefined;
+        // Demo credentials last one hour; production Auth supplies verified expiry in epoch milliseconds (#36).
+        return member && { ...member, expiresAt: Date.now() + 60 * 60 * 1000 };
     }
 }
 export const id = () => randomUUID();

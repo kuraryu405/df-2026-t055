@@ -1,4 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import { subscribeSupport } from './support-ws.ts';
+import { staffSupportNotificationSchema, learnerSupportNotificationSchema } from '../../../packages/shared/src/support.ts';
+import React, { useEffect, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { EditedStep, ReviewChecks, LearnerSessionDTO } from '../../../packages/shared/src/index.ts';
 import { hold, readSafety, flushSafety, safetyKey, clearWaiting } from './safety.ts';
@@ -201,11 +203,20 @@ function Support({ action }: {
     action: Action;
 }) {
     const [items, setItems] = useState<any[]>([]);
-    const load = async () => setItems((await api('/support-requests')).requests);
+    const loadSequence = useRef(0);
+    const load = async () => {
+        const sequence = ++loadSequence.current;
+        const data = await api('/support-requests');
+        if (sequence === loadSequence.current) setItems(data.requests);
+    };
     useEffect(() => {
         void action(load);
         const t = setInterval(() => void action(load), 3000);
-        return () => clearInterval(t);
+        const unsubscribe = subscribeSupport(account, undefined, value => {
+            staffSupportNotificationSchema.parse(value);
+            void action(load);
+        });
+        return () => { clearInterval(t); unsubscribe(); };
     }, []);
     return <><button onClick={() => go('/staff')}>作業一覧</button><h1>支援要求</h1><p>3秒間隔で更新します。</p>{!items.length && <p>未対応の要求はありません。</p>}{items.map(q => <section key={q.requestId}><h2>{q.kind === 'stop' ? 'やめる' : '手伝って'}：{q.status === 'open' ? '対応待ち' : q.status === 'assigned' ? '担当決定済み' : '対応中'}</h2><button onClick={() => void action(async () => {
                 await api(`/support-requests/${q.requestId}/${q.kind === 'stop' ? 'acknowledge' : q.status === 'open' ? 'claim' : q.status === 'assigned' ? 'start' : 'acknowledge'}`, 'POST', {});
@@ -242,6 +253,7 @@ function Learner({ uid, path, action }: {
     action: Action;
 }) {
     const sessionId = path.match(/\/me\/sessions\/([^/]+)/)?.[1];
+    const latestSupport = useRef({ sessionId: '', session: -1, requestId: '', support: -1 });
     const [assignments, setAssignments] = useState<any[]>([]), [session, setSession] = useState<LearnerSessionDTO>(), [safetyTick, setSafetyTick] = useState(0), [message, setMessage] = useState(''), [busy, setBusy] = useState(false), [homeHalted, setHomeHalted] = useState(false);
     const key = sessionId ? safetyKey(uid, sessionId) : '';
     const safety = readSafety(localStorage, key);
@@ -292,6 +304,28 @@ function Learner({ uid, path, action }: {
             clearInterval(timer);
         };
     }, [uid, key, safetyTick]);
+    useEffect(() => {
+        if (!sessionId || !(safety.waiting || session?.status === 'waiting_help') || safety.stopped) return;
+        let active = true;
+        const apply = (state: { sessionId: string; releaseId: string; status: LearnerSessionDTO['status']; stepIndex: number; revision: number; support?: { requestId: string; revision: number; status: string } }) => {
+            if (!active || state.sessionId !== sessionId || readSafety(localStorage, key).stopped) return;
+            const latest = latestSupport.current;
+            if (latest.sessionId === sessionId && (state.revision < latest.session || (state.support?.requestId === latest.requestId && state.support && state.support.revision < latest.support))) return;
+            latestSupport.current = { sessionId, session: state.revision, requestId: state.support?.requestId ?? (state.revision === latest.session ? latest.requestId : ''), support: state.support?.revision ?? (state.revision === latest.session ? latest.support : -1) };
+            setSession(previous => {
+                if (!previous || previous.releaseId !== state.releaseId || state.revision < previous.revision) return previous;
+                // Only a saved transition beyond the help revision can release the local wait.
+                const pending = readSafety(localStorage, key);
+                if (state.status === 'active' && state.revision > previous.revision && !pending.pending.length) clearWaiting(localStorage, key);
+                return { ...previous, status: state.status, stepIndex: state.stepIndex, revision: state.revision };
+            });
+            if (state.support) setMessage(state.support.status === 'open' ? '職員をよんでいます' : state.support.status === 'acknowledged' ? '対応が終わりました' : '担当の職員が決まりました');
+        };
+        const poll = async () => { try { apply(await api(`/me/sessions/${sessionId}`)); } catch { /* Keep waiting during disconnects. */ } };
+        const timer = setInterval(() => void poll(), 3000);
+        const unsubscribe = subscribeSupport(uid, sessionId, value => apply(learnerSupportNotificationSchema.parse(value).payload));
+        return () => { active = false; clearInterval(timer); unsubscribe(); };
+    }, [uid, sessionId, safety.waiting, safety.stopped, session?.status]);
     const requestSafety = (type: 'help' | 'stop') => {
         if (!sessionId) {
             setHomeHalted(true);
