@@ -1,3 +1,4 @@
+import { learnerStepPresentation, type LearnerDisplaySession } from './learner-display.ts';
 import { isManualDraft, releaseCopySource, beginReleaseCopy, type ReleaseCopyState } from './release-copy.ts';
 import { releaseCopyResponseSchema } from '../../../packages/shared/src/index.ts';
 import { missingDraftChecks, draftPreviewMode, savedDraftReview } from './draft-review.ts';
@@ -327,7 +328,7 @@ function Learner({ uid, path, action }: {
 }) {
     const sessionId = path.match(/\/me\/sessions\/([^/]+)/)?.[1];
     const latestSupport = useRef({ sessionId: '', session: -1, requestId: '', support: -1 });
-    const [assignments, setAssignments] = useState<any[]>([]), [session, setSession] = useState<LearnerSessionDTO>(), [safetyTick, setSafetyTick] = useState(0), [message, setMessage] = useState(''), [busy, setBusy] = useState(false), [homeHalted, setHomeHalted] = useState(false);
+    const [assignments, setAssignments] = useState<any[]>([]), [session, setSession] = useState<LearnerDisplaySession>(), [safetyTick, setSafetyTick] = useState(0), [message, setMessage] = useState(''), [busy, setBusy] = useState(false), [homeHalted, setHomeHalted] = useState(false);
     const key = sessionId ? safetyKey(uid, sessionId) : '';
     const safety = readSafety(localStorage, key);
     useEffect(() => {
@@ -424,6 +425,7 @@ function Learner({ uid, path, action }: {
             setBusy(false);
         }
     };
+    const step = session ? learnerStepPresentation(session) : undefined;
     return <div className="learner"><p className="eyebrow">職員が確認した手順</p>{!sessionId ? <><h1>{homeHalted ? message : 'きょうの さぎょう'}</h1>{!homeHalted && (assignments.length ? assignments.map(a => <section key={a.taskId}><h2>{a.title}</h2><button className="primary" disabled={busy} onClick={() => void action(async () => {
                     setBusy(true);
                     try {
@@ -439,6 +441,6 @@ function Learner({ uid, path, action }: {
                 await api(`/me/sessions/${sessionId}/events`, 'POST', { clientEventId: crypto.randomUUID(), expectedRevision: fresh.revision, type: 'resume' });
                 clearWaiting(localStorage, key);
                 setSession(await api(`/me/sessions/${sessionId}`));
-            })}>つづける</button></section> : session?.status === 'completed' ? <section><h1>おわりました</h1><p>職員をよんでください</p></section> : session ? <section><p className="position">{session.stepIndex + 1} / {session.steps.length}</p><Asset id={session.steps[session.stepIndex].imageAssetId}/><h1>{session.steps[session.stepIndex].text}</h1>{session.steps[session.stepIndex].audioAssetId && <Asset key={session.steps[session.stepIndex].audioAssetId} id={session.steps[session.stepIndex].audioAssetId!} audio/>}<p>{session.steps[session.stepIndex].visibleCaution}</p><div className="controls"><button disabled={busy || session.stepIndex === 0} onClick={() => void action(() => event('back'))}>もどる</button><button className="primary" disabled={busy} onClick={() => void action(() => event(session.stepIndex === session.steps.length - 1 ? 'complete' : 'next'))}>{session.stepIndex === session.steps.length - 1 ? 'おわる' : 'つぎへ'}</button></div></section> : <p>読み込み中です</p>}<div className="safety"><button className="help" onClick={() => requestSafety('help')} disabled={safety.stopped || session?.status === 'stopped'}>手伝って</button><button className="stop" onClick={() => requestSafety('stop')}>やめる</button></div></div>;
+            })}>つづける</button></section> : session?.status === 'completed' ? <section><h1>おわりました</h1><p>職員をよんでください</p></section> : session ? <section><p className="position">{session.stepIndex + 1} / {session.steps.length}</p><Asset id={step!.imageAssetId} alt={step!.imageAltText}/>{step!.text !== undefined && <h1>{step!.text}</h1>}{step!.audioAssetId && <Asset key={step!.audioAssetId} id={step!.audioAssetId} audio/>}{step!.visibleCaution !== undefined && <p>{step!.visibleCaution}</p>}<div className="controls"><button disabled={busy || session.stepIndex === 0} onClick={() => void action(() => event('back'))}>もどる</button><button className="primary" disabled={busy} onClick={() => void action(() => event(session.stepIndex === session.steps.length - 1 ? 'complete' : 'next'))}>{session.stepIndex === session.steps.length - 1 ? 'おわる' : 'つぎへ'}</button></div></section> : <p>読み込み中です</p>}<div className="safety"><button className="help" onClick={() => requestSafety('help')} disabled={safety.stopped || session?.status === 'stopped'}>手伝って</button><button className="stop" onClick={() => requestSafety('stop')}>やめる</button></div></div>;
 }
 createRoot(document.getElementById('root')!).render(<App />);
