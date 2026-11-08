@@ -177,7 +177,7 @@ export function createApp(options: {
         staff(res);
         const { learnerId } = generationRequestSchema.parse(req.body);
         const t = await get('tasks', req.params.id, res);
-        await get('learners', learnerId, res);
+        const learner = await get('learners', learnerId, res);
         if (t.status !== 'ready')
             fail(409, 'VIDEO_NOT_READY');
         const result = await db.transaction(async () => {
@@ -185,7 +185,7 @@ export function createApp(options: {
             if (jobs.reduce((n, j) => n + j.budgetUsed, 0) >= limit || jobs.filter(j => j.taskId === t.id).reduce((n, j) => n + j.budgetUsed, 0) >= 10)
                 fail(409, 'GENERATION_LIMIT');
             const d = doc(t.orgId, {
-                taskId: t.id, learnerId, revision: 0, status: 'generating', editedSteps: [], reviewChecks: { presentationConfirmed: false, flagResolution: '', steps: {} }, updatedBy: member(res).uid
+                taskId: t.id, learnerId, displayMode: learner.preferences.displayMode ?? 'photo_text', audioGuidance: learner.preferences.audioGuidance ?? false, revision: 0, status: 'generating', editedSteps: [], reviewChecks: { presentationConfirmed: false, flagResolution: '', steps: {} }, updatedBy: member(res).uid
             });
             const j = doc(t.orgId, {
                 taskId: t.id, draftId: d.id, status: 'queued', attempt: 0, budgetUsed: 1, modelId: options.modelId ?? 'fake-fixture', promptVersion: '1'
@@ -226,7 +226,7 @@ export function createApp(options: {
     }
     api.patch('/drafts/:id', async (req, res) => {
         staff(res);
-        const input = draftPatchSchema.parse(req.body);
+        const { displayMode, audioGuidance, appliedSupportRecordRefs, correctionReason, ...input } = draftPatchSchema.parse(req.body);
         const revision = await db.transaction(async () => {
             const d = await get('drafts', req.params.id, res);
             if (d.status !== 'editing' || d.revision !== input.expectedRevision)
@@ -237,7 +237,7 @@ export function createApp(options: {
                 return !ai || s.text !== ai.instructionDraft || s.sourceStartMs !== ai.startMs || s.sourceEndMs !== ai.endMs || s.frameMs !== ai.frameMs || s.coaching !== ai.coachingDraft;
             }).length;
             await db.put('drafts', {
-                ...d, editedSteps: input.editedSteps, reviewChecks: input.reviewChecks, modificationCount, revision: d.revision + 1, updatedBy: member(res).uid
+                ...d, ...(displayMode !== undefined ? { displayMode } : {}), ...(audioGuidance !== undefined ? { audioGuidance } : {}), ...(appliedSupportRecordRefs !== undefined ? { appliedSupportRecordRefs } : {}), ...(correctionReason !== undefined ? { correctionReason } : {}), editedSteps: input.editedSteps, reviewChecks: input.reviewChecks, modificationCount, revision: d.revision + 1, updatedBy: member(res).uid
             });
             return d.revision + 1;
         });
@@ -298,7 +298,7 @@ export function createApp(options: {
                 fail(409, 'REVISION_CONFLICT');
             const audioAssets: Doc[] = [];
             const learner = await get('learners', d.learnerId, res);
-            if (learner.preferences.audioGuidance === true) {
+            if ((fresh.audioGuidance ?? learner.preferences.audioGuidance) === true) {
                 try {
                     for (const s of steps) {
                         const audio = await tts.synthesize(s.text);
