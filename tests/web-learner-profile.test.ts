@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import ts from 'typescript';
 import React from 'react';
-import { buildLearnerProfile, emptyLearnerForm } from '../apps/web/src/learner-form.ts';
+import { buildLearnerProfileUpdate, learnerProfileToForm, buildLearnerProfile, emptyLearnerForm } from '../apps/web/src/learner-form.ts';
 import { createApp } from '../apps/api/src/app.ts';
 import { MemoryRepository, seed } from '../apps/api/src/adapters.ts';
 
@@ -41,16 +41,20 @@ function harness() {
     const db = new MemoryRepository(); seed(db);
     const { app } = createApp({ db });
     let path = '/staff/learners', fail = false, posts = 0;
+    const calls: {url: string; method: string; body: any}[] = [];
     const go = (value: string) => { path = value; hooks.reset(); };
     const api = async (url: string, method = 'GET', body?: unknown) => {
+        calls.push({url, method, body});
+        if (method === 'PATCH' && fail) throw Error('通信失敗');
         if (method === 'POST') { posts++; if (fail) throw Error('通信失敗'); }
         const response = await app.fetch(new Request('http://localhost/api/v1' + url, { method, headers: { authorization: 'Bearer staff', 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }));
         const result = await response.json();
+        if (!response.ok) throw Object.assign(Error(result.error.code), {status: response.status});
         assert.equal(response.status, method === 'POST' ? 201 : 200);
         return result;
     };
     const render = () => { hooks.begin(); return StaffLearners({ path, api, go }); };
-    return { render, db, get path() { return path; }, get posts() { return posts; }, setFail(value: boolean) { fail = value; } };
+    return { render, db, api, go, calls, get path() { return path; }, get posts() { return posts; }, setFail(value: boolean) { fail = value; } };
 }
 
 test('form payload omits unknown values, preserves false and separates wishes/observations/suggestions', () => {
@@ -101,4 +105,88 @@ test('failed send keeps preview and original input, exposes alert and permits re
     assert.equal(button(tree, 'この内容で登録する').props.disabled, false);
     button(tree, '修正へ戻る').props.onClick(); tree = h.render();
     assert.equal(nodes(tree).find(n => n.type === 'input').props.value, '架空失敗');
+});
+
+function input(tree: any, label: string) {
+    const node = nodes(tree).find(n => n.type === 'label' && text(n).startsWith(label));
+    return nodes(node).find(n => ['input', 'textarea', 'select'].includes(n.type));
+}
+function change(tree: any, label: string, value: string) { input(tree, label).props.onChange({target: {value}}); }
+function confirm(tree: any) { nodes(tree).find(n => n.type === 'form').props.onSubmit({preventDefault() {}}); }
+async function settle() { await new Promise(r => setImmediate(r)); }
+async function open(h: ReturnType<typeof harness>, path: string) {
+    h.go(path); h.render(); await hooks.flush(); return h.render();
+}
+test('update builder separates retain, replace, delete and clears editable notes/preferences', () => {
+    const form = { ...emptyLearnerForm, displayName: '架空', confirmedGuidance: '確認1\n確認2', disabilityDetail: '情報', disabilitySource: '本人', disabilityConfirmedAt: '2026-11-08T10:00' };
+    const keep = buildLearnerProfileUpdate(form, 4);
+    assert.equal(Object.hasOwn(keep, 'disabilityInfo'), false);
+    assert.deepEqual(keep.confirmedGuidance, ['確認1', '確認2']);
+    assert.deepEqual(keep.preferences, {}); assert.deepEqual(keep.learnerWishes, []);
+    assert.equal(keep.expectedRevision, 4);
+    assert.equal(buildLearnerProfileUpdate({...form, disabilityAction: 'delete'}, 4).disabilityInfo, null);
+    assert.equal(buildLearnerProfileUpdate({...form, disabilityAction: 'replace'}, 4).disabilityInfo?.detail, '情報');
+    assert.throws(() => buildLearnerProfileUpdate({...emptyLearnerForm, displayName: '架空', disabilityAction: 'replace'}, 1));
+});
+test('edit loads saved values and metadata; PATCH retain/replace/delete return to refreshed detail without altering fixed records', async () => {
+    const h = harness();
+    const info = {detail: '架空情報', source: '本人確認', confirmedAt: '2026-11-08T00:00:00Z'};
+    await h.api('/learners/a', 'PATCH', {expectedRevision: 1, disabilityInfo: info, confirmedGuidance: ['確認済み'], preferences: {audioGuidance: false, displayMode: 'photo_only'}});
+    for (const collection of ['releases', 'sessions', 'assignments', 'generationJobs'])
+        await h.db.put(collection, { createdAt: '2026-11-08T00:00:00Z', id: 'fixed', orgId: 'demo', learnerId: 'a', releaseId: 'approved-fixed', displayMode: 'photo_only', revision: 1 });
+    const fixed = ['releases', 'sessions', 'assignments', 'generationJobs'].map(key => structuredClone(h.db.all(key)));
+    for (const action of ['keep', 'replace', 'delete']) {
+        let tree = await open(h, '/staff/learners/a');
+        button(tree, 'プロフィールを編集する').props.onClick(); h.render(); await hooks.flush(); tree = h.render();
+        assert.match(text(tree), /登録者：staff／更新者：staff／revision：/);
+        assert.equal(input(tree, '確認済みの配慮').props.value, '確認済み');
+        assert.equal(input(tree, '音声ガイド').props.value, 'false');
+        for (const n of nodes(tree).filter(n => ['input', 'textarea', 'select'].includes(n.type))) {
+            assert.ok(nodes(tree).some(label => label.type === 'label' && nodes(label).includes(n)));
+            assert.equal(n.props.tabIndex, undefined);
+        }
+        change(tree, '障害情報の変更', action); tree = h.render();
+        if (action === 'replace') { assert.equal(input(tree, '詳細').props.value, '架空情報'); change(tree, '詳細', '架空置換'); tree = h.render(); }
+        change(tree, '表示名', '架空更新'); tree = h.render();
+        const before = h.calls.filter(c => c.method === 'PATCH').length;
+        confirm(tree); tree = h.render();
+        assert.equal(h.calls.filter(c => c.method === 'PATCH').length, before);
+        if (action === 'delete') assert.match(text(ProfileValues({profile: nodes(tree).filter(n => n.type === ProfileValues).at(-1).props.profile})), /削除する/);
+        button(tree, 'この内容で更新する').props.onClick(); await settle();
+        assert.equal(h.path, '/staff/learners/a'); h.render(); await hooks.flush(); tree = h.render();
+        const displayed = nodes(tree).find(n => n.type === ProfileValues).props.profile;
+        assert.equal(displayed.displayName, '架空更新');
+        assert.equal(displayed.disabilityInfo?.detail, action === 'delete' ? undefined : action === 'replace' ? '架空置換' : '架空情報');
+    }
+    assert.deepEqual(['releases', 'sessions', 'assignments', 'generationJobs'].map(key => h.db.all(key)), fixed);
+});
+test('409 retains input, refresh shows latest separately, retry uses latest revision; send failure retains preview', async () => {
+    const h = harness(); let tree = await open(h, '/staff/learners/a/edit');
+    change(tree, '表示名', '自分の入力'); tree = h.render(); confirm(tree); tree = h.render();
+    await h.api('/learners/a', 'PATCH', {expectedRevision: 1, displayName: '他職員の更新'});
+    button(tree, 'この内容で更新する').props.onClick(); await settle(); tree = h.render();
+    assert.match(text(nodes(tree).find(n => n.props.role === 'alert')), /REVISION_CONFLICT/);
+    assert.equal(button(tree, 'この内容で更新する').props.disabled, true);
+    button(tree, '最新値を取得').props.onClick(); await settle(); tree = h.render();
+    assert.equal(input(tree, '表示名').props.value, '自分の入力');
+    assert.equal(nodes(tree).find(n => n.type === ProfileValues).props.profile.displayName, '他職員の更新');
+    confirm(tree); tree = h.render(); h.setFail(true);
+    button(tree, 'この内容で更新する').props.onClick(); await settle(); tree = h.render();
+    assert.match(text(nodes(tree).find(n => n.props.role === 'alert')), /通信失敗/);
+    h.setFail(false); button(tree, 'この内容で更新する').props.onClick(); await settle();
+    assert.equal(h.calls.filter(c => c.method === 'PATCH').at(-1)!.body.expectedRevision, 2);
+    assert.equal(h.db.get('learners', 'a')!.displayName, '自分の入力');
+});
+test('switching learner discards previous input and preview; load failure offers list navigation', async () => {
+    const main = await readFile(new URL('../apps/web/src/main.tsx', import.meta.url), 'utf8');
+    assert.match(main, /<StaffLearners key=\{path\}/);
+    const h = harness(); let tree = await open(h, '/staff/learners/a/edit');
+    change(tree, '表示名', '残してはいけない入力'); tree = h.render(); confirm(tree); tree = h.render();
+    tree = await open(h, '/staff/learners/b/edit');
+    assert.equal(input(tree, '表示名').props.value, h.db.get('learners', 'b')!.displayName);
+    assert.equal(button(tree, 'この内容で更新する'), undefined);
+    assert.doesNotMatch(text(tree), /残してはいけない入力/);
+    tree = await open(h, '/staff/learners/missing/edit');
+    assert.ok(nodes(tree).find(n => n.props.role === 'alert'));
+    button(tree, '本人一覧へ戻る').props.onClick(); assert.equal(h.path, '/staff/learners');
 });
