@@ -1,3 +1,4 @@
+import { missingDraftChecks, draftPreviewMode, savedDraftReview } from './draft-review.ts';
 import { StaffLearners } from './staff-learners.tsx';
 import { createTokenProvider } from './auth.ts';
 import { subscribeSupport } from './support-ws.ts';
@@ -21,8 +22,9 @@ function go(path: string) {
     history.pushState({}, '', path);
     window.dispatchEvent(new PopStateEvent('popstate'));
 }
-function Asset({ id, video = false, audio = false, startMs = 0, endMs }: {
+function Asset({ id, video = false, audio = false, startMs = 0, endMs, alt = 'この工程の手元の写真' }: {
     id: string;
+    alt?: string;
     video?: boolean;
     audio?: boolean;
     startMs?: number;
@@ -46,7 +48,7 @@ function Asset({ id, video = false, audio = false, startMs = 0, endMs }: {
                 URL.revokeObjectURL(object);
         };
     }, [id]);
-    return url ? audio ? <audio key={id} src={url} controls preload="metadata" aria-label="手順の読み上げ"/> : video ? <video key={`${id}:${startMs}:${endMs}`} src={`${url}#t=${startMs / 1000}${endMs === undefined ? '' : ',' + endMs / 1000}`} controls preload="metadata"/> : <img src={url} alt="この工程の手元の写真"/> : <div className="placeholder">写真・動画を読み込み中</div>;
+    return url ? audio ? <audio key={id} src={url} controls preload="metadata" aria-label="手順の読み上げ"/> : video ? <video key={`${id}:${startMs}:${endMs}`} src={`${url}#t=${startMs / 1000}${endMs === undefined ? '' : ',' + endMs / 1000}`} controls preload="metadata"/> : <img src={url} alt={alt}/> : <div className="placeholder">写真・動画を読み込み中</div>;
 }
 function App() {
     const [path, setPath] = useState(location.pathname);
@@ -124,9 +126,17 @@ function Draft({ id, action }: {
     action: Action;
 }) {
     const [draft, setDraft] = useState<any>(), [task, setTask] = useState<any>(), [steps, setSteps] = useState<EditedStep[]>([]), [checks, setChecks] = useState<ReviewChecks>({ presentationConfirmed: false, flagResolution: '', steps: {} }), [release, setRelease] = useState<any>(), [busy, setBusy] = useState(false), [preview, setPreview] = useState<number | null>(null);
+    const [displayMode, setDisplayMode] = useState<'photo_only' | 'photo_text'>('photo_text'), [audioGuidance, setAudioGuidance] = useState(false);
+    const [previewMode, setPreviewMode] = useState<'photo_only' | 'photo_text'>('photo_text');
+    const [error, setError] = useState(''), [conflict, setConflict] = useState(false), [latest, setLatest] = useState<any>();
+    const sending = useRef(false);
+    const previewTrigger = useRef<HTMLButtonElement | null>(null);
+    const closePreview = () => { setPreview(null); previewTrigger.current?.focus(); };
     const load = async () => {
         const d = (await api(`/drafts/${id}`)).draft;
         setDraft(d);
+        setDisplayMode(draftPreviewMode(d.displayMode));
+        setAudioGuidance(d.audioGuidance ?? false);
         setSteps(d.editedSteps);
         setChecks(d.reviewChecks);
         setTask((await api(`/tasks/${d.taskId}`)).task);
@@ -144,20 +154,44 @@ function Draft({ id, action }: {
         return <p>下書きを取得中…</p>;
     const change = (i: number, key: keyof EditedStep, value: string | number) => {
         setSteps(old => old.map((s, j) => i === j ? { ...s, [key]: value } : s));
-        setChecks(c => ({ ...c, presentationConfirmed: false, steps: { ...c.steps, [steps[i].stepId]: { videoVerified: false, photoTextVerified: false } } }));
+        setChecks(c => ({ ...c, presentationConfirmed: false, steps: { ...c.steps, [steps[i].stepId]: { videoVerified: ['sourceStartMs', 'sourceEndMs', 'frameMs'].includes(key) ? false : (c.steps[steps[i].stepId]?.videoVerified ?? false), photoTextVerified: false } } }));
+    };
+    const flagsRequired = !draft.sourceReleaseId && !!(draft.aiProposal?.reviewFlags.length || draft.aiProposal?.steps.some((s: any) => s.reviewFlags.length));
+    const missing = missingDraftChecks(steps, checks, flagsRequired);
+    const run = async (fn: () => Promise<void>) => {
+        if (sending.current) return;
+        sending.current = true;
+        setBusy(true); setError('');
+        try { await fn(); }
+        catch (e) {
+            if ((e as {status?: number}).status === 409) {
+                setConflict(true);
+                setError('状態が変わりました。入力は保持しています。「最新値を取得」して比較してから再保存してください。');
+            } else setError((e as Error).message);
+        } finally { sending.current = false; setBusy(false); }
+    };
+    const fetchLatest = async () => {
+        const d = (await api(`/drafts/${id}`)).draft;
+        setLatest(d);
+        setDraft({ ...draft, revision: d.revision });
+        setConflict(d.status !== 'editing');
+        if (d.status !== 'editing') setError('最新の下書きは編集できない状態です。入力は保持しています。');
     };
     const save = async () => {
-        const result = await api(`/drafts/${id}`, 'PATCH', { expectedRevision: draft.revision, editedSteps: steps, reviewChecks: checks });
-        setDraft({ ...draft, revision: result.revision });
-        return result.revision;
+        const result = savedDraftReview(await api(`/drafts/${id}`, 'PATCH', { expectedRevision: draft.revision, editedSteps: steps, displayMode, audioGuidance, reviewChecks: checks }));
+        setDraft({ ...draft, ...result });
+        setChecks(result.reviewChecks);
+        setLatest(undefined);
+        return result;
     };
     return <><nav><button onClick={() => go('/staff')}>作業一覧</button><button onClick={() => go(`/staff/drafts/${id}/review`)}>確認・承認へ</button><button onClick={() => {
             localStorage.removeItem(`approval:${id}`);
-            void action(load);
-        }}>再取得</button></nav><h1>AIの下書き（解釈）</h1><p>本人：{draft.learnerId === 'a' ? 'Aさん（9工程）' : 'Bさん（折るを細分化・11工程）'} / revision {draft.revision} / {draft.status}</p>{draft.status === 'generating' ? <p role="status">動画解析中です。3秒ごとに状態を確認しています。</p> : draft.status === 'failed' ? <section><p role="alert">生成に失敗しました。本人用の手順は作成されていません。</p><button onClick={() => void action(async () => {
+            if (draft.status === 'editing') void run(fetchLatest);
+            else void action(load);
+        }}>{draft.status === 'editing' ? '最新値を取得' : '再取得'}</button></nav><h1>AIの下書き（解釈）</h1><p>本人：{draft.learnerId === 'a' ? 'Aさん（9工程）' : 'Bさん（折るを細分化・11工程）'} / revision {draft.revision} / {draft.status}</p>{draft.status === 'generating' ? <p role="status">動画解析中です。3秒ごとに状態を確認しています。</p> : draft.status === 'failed' ? <section><p role="alert">生成に失敗しました。本人用の手順は作成されていません。</p><button onClick={() => void action(async () => {
                 const r = await api(`/tasks/${draft.taskId}/generations`, 'POST', { learnerId: draft.learnerId });
                 go(`/staff/tasks/${draft.taskId}/drafts/${r.draftId}`);
-            })}>新しいジョブで再試行</button></section> : draft.status === 'approved' ? <section><h2>承認済みです</h2><button onClick={() => go('/staff/handover')}>承認版を確認・本人へ割当</button></section> : <><p>Fake候補です。動画の動作・原音と候補を照合し、必要な修正と写真切り出しを行ってください。確認欄はすべて未確認から始まります。</p><div className="workspace"><aside>{task?.videoAssetId && <Asset id={task.videoAssetId} video/>}<h2>AIの候補・確認が必要な点</h2>{draft.aiProposal?.reviewFlags.map((f: string) => <p key={f}>{f}</p>)}{draft.aiProposal?.steps.map((s: any) => <details key={s.stepId}><summary>{s.stepId}：{s.startMs}–{s.endMs} ms</summary><p>観察候補：{s.observationCandidate}</p><p>声の候補：{s.speechCandidate || '聞き取り未確認'}</p>{s.reviewFlags.map((f: string) => <p key={f}>{f}</p>)}</details>)}</aside><div>{steps.map((s, i) => <section key={s.stepId}><h2>工程 {i + 1}</h2>{s.imageAssetId && <Asset id={s.imageAssetId}/>}<label>本人に見せる短文（40文字以内）<input maxLength={40} value={s.text} onChange={e => change(i, 'text', e.target.value)}/></label><label>本人に見せる注意<input maxLength={200} value={s.visibleCaution} onChange={e => change(i, 'visibleCaution', e.target.value)}/></label><div className="times">{(['sourceStartMs', 'sourceEndMs', 'frameMs'] as const).map((key, j) => <label key={key}>{['開始ms', '終了ms', '写真ms'][j]}<input type="number" min={0} value={s[key]} onChange={e => change(i, key, Number(e.target.value))}/></label>)}</div><button disabled={busy} onClick={() => void action(async () => {
+            })}>新しいジョブで再試行</button></section> : draft.status === 'approved' ? <section><h2>承認済みです</h2><button onClick={() => go('/staff/handover')}>承認版を確認・本人へ割当</button></section> : <><p>Fake候補です。動画の動作・原音と候補を照合し、必要な修正と写真切り出しを行ってください。確認欄はすべて未確認から始まります。</p>{error && <p role="alert">{error}</p>}{latest && <section><h2>サーバーの最新値（入力は保持）</h2><p>revision {latest.revision} / {latest.status}</p><p>表示方法：{latest.displayMode} / 音声：{String(latest.audioGuidance)}</p><pre>{JSON.stringify({ editedSteps: latest.editedSteps, reviewChecks: latest.reviewChecks }, null, 2)}</pre></section>}<fieldset disabled={busy}><legend>この作業の提示設定</legend><label>表示方法<select value={displayMode} onChange={e => { setDisplayMode(e.target.value as typeof displayMode); setChecks(c => ({ ...c, presentationConfirmed: false })); }}><option value="photo_only">写真のみ</option><option value="photo_text">写真＋短文</option></select></label><label><input type="checkbox" checked={audioGuidance} onChange={e => { setAudioGuidance(e.target.checked); setChecks(c => ({ ...c, presentationConfirmed: false })); }}/>音声ガイドを希望する</label></fieldset><fieldset disabled={busy}><legend>工程の編集と確認</legend><div className="workspace"><aside>{task?.videoAssetId && <Asset id={task.videoAssetId} video/>}<h2>AIの候補・確認が必要な点</h2>{draft.aiProposal?.reviewFlags.map((f: string) => <p key={f}>{f}</p>)}{draft.aiProposal?.steps.map((s: any) => <details key={s.stepId}><summary>{s.stepId}：{s.startMs}–{s.endMs} ms</summary><p>観察候補：{s.observationCandidate}</p><p>声の候補：{s.speechCandidate || '聞き取り未確認'}</p>{s.reviewFlags.map((f: string) => <p key={f}>{f}</p>)}</details>)}</aside><div>{steps.map((s, i) => <section key={s.stepId}><h2>工程 {i + 1}</h2>{s.imageAssetId && <Asset id={s.imageAssetId}/>}<label>本人に見せる短文（40文字以内）<input maxLength={40} value={s.text} onChange={e => change(i, 'text', e.target.value)}/></label><label>写真の代替テキスト（200文字以内）<input maxLength={200} value={s.imageAltText ?? ''} onChange={e => change(i, 'imageAltText', e.target.value)}/></label><label>本人に見せる注意<input maxLength={200} value={s.visibleCaution} onChange={e => change(i, 'visibleCaution', e.target.value)}/></label><div className="times">{(['sourceStartMs', 'sourceEndMs', 'frameMs'] as const).map((key, j) => <label key={key}>{['開始ms', '終了ms', '写真ms'][j]}<input type="number" min={0} value={s[key]} onChange={e => change(i, key, Number(e.target.value))}/></label>)}</div><button disabled={busy} onClick={() => void action(async () => {
                     setBusy(true);
                     try {
                         const r = await api(`/drafts/${id}/frames`, 'POST', { frameMs: s.frameMs });
@@ -166,7 +200,7 @@ function Draft({ id, action }: {
                     finally {
                         setBusy(false);
                     }
-                })}>この時刻の写真を原動画から切り出す</button>{(['verifiedObservation', 'verifiedSpeech', 'coaching', 'completionCheck'] as const).map((key, j) => <label key={key}>{['確認した動作', '確認した声', '職員用声かけ・待つ位置', '完成基準'][j]}<textarea maxLength={200} value={s[key]} onChange={e => change(i, key, e.target.value)}/></label>)}{(['videoVerified', 'photoTextVerified'] as const).map((key, j) => <label className="check" key={key}><input type="checkbox" checked={checks.steps[s.stepId]?.[key] ?? false} onChange={e => setChecks(c => ({ ...c, steps: { ...c.steps, [s.stepId]: { ...(c.steps[s.stepId] ?? { videoVerified: false, photoTextVerified: false }), [key]: e.target.checked } } }))}/>{['動画照合済み', '写真・説明確認済み'][j]}</label>)}<button onClick={() => setPreview(i)}>本人表示をプレビュー</button><button onClick={() => {
+                })}>この時刻の写真を原動画から切り出す</button>{(['verifiedObservation', 'verifiedSpeech', 'coaching', 'completionCheck'] as const).map((key, j) => <label key={key}>{['確認した動作', '確認した声', '職員用声かけ・待つ位置', '完成基準'][j]}<textarea maxLength={200} value={s[key]} onChange={e => change(i, key, e.target.value)}/></label>)}{(['videoVerified', 'photoTextVerified'] as const).map((key, j) => <label className="check" key={key}><input type="checkbox" checked={checks.steps[s.stepId]?.[key] ?? false} onChange={e => setChecks(c => ({ ...c, steps: { ...c.steps, [s.stepId]: { ...(c.steps[s.stepId] ?? { videoVerified: false, photoTextVerified: false }), [key]: e.target.checked } } }))}/>{['動画照合済み', '写真・説明確認済み'][j]}</label>)}<button onClick={e => { previewTrigger.current = e.currentTarget; setPreviewMode(draftPreviewMode(displayMode)); setPreview(i); }}>本人表示をプレビュー</button><button onClick={() => {
                     const newStep = {
                         ...s, stepId: crypto.randomUUID(), text: '', imageAssetId: ''
                     };
@@ -175,32 +209,32 @@ function Draft({ id, action }: {
                 }} disabled={steps.length >= 20}>次に工程を追加</button><button disabled={steps.length <= 1} onClick={() => {
                     setSteps(old => old.filter((_, j) => j !== i));
                     setChecks(c => ({ ...c, presentationConfirmed: false }));
-                }}>この工程を削除</button></section>)}</div></div><section><label>確認が必要な点への対応記録<textarea value={checks.flagResolution} onChange={e => setChecks(c => ({ ...c, flagResolution: e.target.value }))}/></label><label className="check"><input type="checkbox" checked={checks.presentationConfirmed} onChange={e => setChecks(c => ({ ...c, presentationConfirmed: e.target.checked }))}/>本人への提示内容確認済み</label><button disabled={busy} onClick={() => void action(async () => {
-                setBusy(true);
-                try {
-                    await save();
-                }
-                finally {
-                    setBusy(false);
-                }
-            })}>編集と確認を保存</button><button disabled={busy} onClick={() => void action(async () => {
-                setBusy(true);
-                try {
+                }}>この工程を削除</button></section>)}</div></div><section><h2>承認までに必要な確認・再確認</h2>{missing.length ? <ul>{missing.map(item => <li key={item}>{item}</li>)}</ul> : <p role="status">確認が揃いました。保存後のサーバー確認を経て承認できます。</p>}<p>内容を変えて保存すると、サーバーが確認を解除します。保存後にプレビューし、確認を付け直してください。</p><label>確認が必要な点への対応記録<textarea maxLength={2000} value={checks.flagResolution} onChange={e => setChecks(c => ({ ...c, flagResolution: e.target.value }))}/></label><label className="check"><input type="checkbox" checked={checks.presentationConfirmed} onChange={e => setChecks(c => ({ ...c, presentationConfirmed: e.target.checked }))}/>本人への提示内容確認済み</label><button disabled={busy || conflict} onClick={() => void run(async () => { await save(); })}>編集と確認を保存</button><button disabled={busy || conflict || missing.length > 0} onClick={() => void run(async () => {
                     const key = `approval:${id}`;
                     const saved = localStorage.getItem(key);
-                    const payload = saved ? JSON.parse(saved) : { expectedRevision: await save(), approvalRequestId: crypto.randomUUID() };
+                    let payload = saved ? JSON.parse(saved) : undefined;
+                    if (!payload) {
+                        const result = await save();
+                        if (missingDraftChecks(steps, result.reviewChecks, flagsRequired).length) {
+                            setError('保存後の内容に再確認が必要です。プレビューし、確認を付け直してください。');
+                            return;
+                        }
+                        payload = { expectedRevision: result.revision, approvalRequestId: crypto.randomUUID() };
+                    }
                     localStorage.setItem(key, JSON.stringify(payload));
                     const r = await api(`/drafts/${id}/approve`, 'POST', payload);
                     setRelease(r);
                     setDraft({ ...draft, status: 'approved', revision: payload.expectedRevision });
-                }
-                finally {
-                    setBusy(false);
-                }
-            })}>この内容を承認</button></section></>}{release && <section><h2>版 {release.version} を新規保存しました</h2><button onClick={() => void action(async () => {
+            })}>この内容を承認</button></section></fieldset></>}{release && <section><h2>版 {release.version} を新規保存しました</h2><button onClick={() => void action(async () => {
                 await api(`/assignments/${draft.learnerId}/${draft.taskId}`, 'PUT', { releaseId: release.releaseId });
                 go('/staff/handover');
-            })}>本人の端末へ渡す（次回開始版）</button></section>}{preview !== null && steps[preview] && <div className="modal" role="dialog" aria-modal="true" aria-label="職員用本人表示プレビュー"><section><p>職員認証内のプレビュー（未承認）</p><Asset id={steps[preview].imageAssetId}/><h2>{steps[preview].text}</h2><p>{steps[preview].visibleCaution}</p><button onClick={() => setPreview(null)}>閉じる</button></section></div>}</>;
+            })}>本人の端末へ渡す（次回開始版）</button></section>}{preview !== null && steps[preview] && <div className="modal" role="dialog" aria-modal="true" aria-label="職員用本人表示プレビュー"><section onKeyDown={e => { if (e.key === 'Escape') closePreview();
+                if (e.key === 'Tab') {
+                    const controls = e.currentTarget.querySelectorAll<HTMLElement>('select, button');
+                    const first = controls[0], last = controls[controls.length - 1];
+                    if (e.shiftKey && e.target === first) { e.preventDefault(); last.focus(); }
+                    else if (!e.shiftKey && e.target === last) { e.preventDefault(); first.focus(); }
+                } }}><p>職員認証内のプレビュー（未承認）</p><label>プレビューの表示方法<select autoFocus value={previewMode} onChange={e => setPreviewMode(e.target.value as typeof previewMode)}><option value="photo_only">写真のみ</option><option value="photo_text">写真＋短文</option></select></label><div aria-label="本人への提示内容"><p>工程 {preview + 1} / {steps.length}</p><Asset id={steps[preview].imageAssetId} alt={steps[preview].imageAltText || steps[preview].text}/>{previewMode === 'photo_text' && <><h2>{steps[preview].text}</h2><p>{steps[preview].visibleCaution}</p></>}</div><aside><h2>職員の確認用</h2><p>代替テキスト：{steps[preview].imageAltText || steps[preview].text}</p>{previewMode === 'photo_only' && <><p>写真のみでは短文・注意書きを表示しません。写真の順序を確認し、本人と一対一で手本を示して注意の伝わり方を確かめてください。</p><p>伝える注意：{steps[preview].visibleCaution || 'なし'}</p><p>声かけ・待つ位置：{steps[preview].coaching || '未記録'}</p><p>必要な伝え方を工程の「職員用声かけ・待つ位置」に記録してから提示内容を確認してください。音声だけに頼らず確認してください。</p></>}<p>音声ガイド：{audioGuidance ? '希望あり（承認時に生成。ここでは再生しません）' : '希望なし'}</p></aside><button onClick={closePreview}>閉じる</button></section></div>}</>;
 }
 function Support({ action }: {
     action: Action;
