@@ -207,8 +207,8 @@ function Support({ action }: {
         const t = setInterval(() => void action(load), 3000);
         return () => clearInterval(t);
     }, []);
-    return <><button onClick={() => go('/staff')}>作業一覧</button><h1>支援要求</h1><p>3秒間隔で更新します。</p>{!items.length && <p>未対応の要求はありません。</p>}{items.map(q => <section key={q.id}><h2>{q.learnerId === 'a' ? 'Aさん' : 'Bさん'}：{q.kind === 'stop' ? 'やめる' : '手伝って'}</h2><p>工程：{q.stepId}</p><button onClick={() => void action(async () => {
-                await api(`/support-requests/${q.id}/acknowledge`, 'POST', {});
+    return <><button onClick={() => go('/staff')}>作業一覧</button><h1>支援要求</h1><p>3秒間隔で更新します。</p>{!items.length && <p>未対応の要求はありません。</p>}{items.map(q => <section key={q.requestId}><h2>{q.kind === 'stop' ? 'やめる' : '手伝って'}：{q.status === 'open' ? '対応待ち' : q.status === 'assigned' ? '担当決定済み' : '対応中'}</h2><button onClick={() => void action(async () => {
+                await api(`/support-requests/${q.requestId}/acknowledge`, 'POST', {});
                 await load();
             })}>対応済みにする</button></section>)}</>;
 }

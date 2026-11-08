@@ -6,6 +6,7 @@ import { resolve, extname } from 'node:path';
 export type Request = {
     method: string;
     path: string;
+    searchParams: URLSearchParams;
     headers: IncomingMessage['headers'];
     params: Record<string, string>;
     body: any;
@@ -135,7 +136,7 @@ export class Router {
             return globalThis.Response.json({ error: { code: 'PAYLOAD_TOO_LARGE', message: 'ファイルが大きすぎます', requestId: crypto.randomUUID() } }, { status: 422 });
         const headers = Object.fromEntries(input.headers.entries());
         const req: Request = {
-            method: input.method, path: new URL(input.url).pathname, headers, params: {}, body: undefined, rawBody, is: (mime) => String(headers['content-type'] ?? '').split(';')[0].trim() === mime
+            method: input.method, path: new URL(input.url).pathname, searchParams: new URL(input.url).searchParams, headers, params: {}, body: undefined, rawBody, is: (mime) => String(headers['content-type'] ?? '').split(';')[0].trim() === mime
         };
         return new Promise(resolveResponse => {
             let status = 200;

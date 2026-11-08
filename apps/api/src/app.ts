@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { releaseCopyRequestSchema, releaseCopyResponseSchema, draftDetailSchema, editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, normalizeRelease, projectReleaseToSessionSteps, learnerSessionSchema, type Member } from '../../../packages/shared/src/index.ts';
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
+import { supportOperationRequestSchema, supportClaimResponseSchema, supportRequestListResponseSchema, supportRequestStatusQuerySchema } from '../../../packages/shared/src/support.ts';
 import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
 import { media } from './media.ts';
@@ -532,7 +533,7 @@ export function createApp(options: {
             await db.put('sessionEvents', e);
             if (['stop', 'help'].includes(input.type))
                 await db.put('supportRequests', doc(s.orgId, {
-                    sessionId: s.id, eventId: e.id, learnerId: s.learnerId, stepId: e.stepId, kind: input.type, status: 'open'
+                    sessionId: s.id, eventId: e.id, learnerId: s.learnerId, stepId: e.stepId, kind: input.type, status: 'open', revision: 1
                 }));
             await db.put('sessions', s);
             return s;
@@ -541,7 +542,39 @@ export function createApp(options: {
     });
     api.get('/support-requests', async (req, res) => {
         staff(res);
-        send(res, { requests: (await list('supportRequests', res)).filter(q => q.status === 'open') });
+        if (req.searchParams.getAll('status').length > 1)
+            fail(422, 'INVALID_INPUT');
+        const { status } = supportRequestStatusQuerySchema.parse(Object.fromEntries(req.searchParams));
+        const requests = (await list('supportRequests', res))
+            .filter(q => status ? q.status === status : ['open', 'assigned', 'in_progress'].includes(q.status))
+            .map(q => ({
+                schemaVersion: '1', requestId: q.id, sessionId: q.sessionId, eventId: q.eventId,
+                kind: q.kind, status: q.status, revision: q.revision, createdAt: q.createdAt,
+                ...(q.kind === 'help' && q.status !== 'open' ? { assignedTo: q.assignedTo, assignedAt: q.assignedAt } : {}),
+                ...(q.kind === 'help' && ['in_progress', 'acknowledged'].includes(q.status) ? { startedBy: q.startedBy, startedAt: q.startedAt } : {}),
+                ...(q.status === 'acknowledged' ? { acknowledgedBy: q.acknowledgedBy, acknowledgedAt: q.acknowledgedAt } : {})
+            }));
+        res.json(supportRequestListResponseSchema.parse({ requests }));
+    });
+    api.post('/support-requests/:id/claim', async (req, res) => {
+        staff(res);
+        supportOperationRequestSchema.parse(req.body);
+        const result = await db.transaction(async () => {
+            const q = await get('supportRequests', req.params.id, res);
+            if (q.kind !== 'help')
+                fail(409, 'INVALID_STATE');
+            if (q.status === 'assigned' && q.assignedTo === member(res).uid)
+                return supportClaimResponseSchema.parse({ schemaVersion: '1', status: 'assigned', assignedTo: q.assignedTo, assignedAt: q.assignedAt, revision: q.revision });
+            if (q.status !== 'open')
+                fail(409, q.assignedTo && q.assignedTo !== member(res).uid ? 'CLAIM_CONFLICT' : 'INVALID_STATE');
+            const response = supportClaimResponseSchema.parse({
+                schemaVersion: '1', status: 'assigned', assignedTo: member(res).uid, assignedAt: now(), revision: q.revision + 1
+            });
+            const { schemaVersion, ...update } = response;
+            await db.put('supportRequests', { ...q, ...update });
+            return response;
+        });
+        res.json(result);
     });
     api.post('/support-requests/:id/acknowledge', async (req, res) => {
         staff(res);

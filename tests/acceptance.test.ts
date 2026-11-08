@@ -242,7 +242,7 @@ test('手伝っては進行を止め、職員の対応後に本人が同じ工�
         await h.ok(`/me/sessions/${s.sessionId}/events`, 'POST', { clientEventId: 'help', expectedRevision: 0, type: 'help' }, 'learner-a');
         assert.equal((await h.request(`/me/sessions/${s.sessionId}/events`, 'POST', { clientEventId: 'resume', expectedRevision: 1, type: 'resume' }, 'learner-a')).status, 409);
         const q = (await h.ok('/support-requests')).requests[0];
-        await h.ok(`/support-requests/${q.id}/acknowledge`, 'POST', {});
+        await h.ok(`/support-requests/${q.requestId}/acknowledge`, 'POST', {});
         const resumed = await h.ok(`/me/sessions/${s.sessionId}/events`, 'POST', { clientEventId: 'resume', expectedRevision: 1, type: 'resume' }, 'learner-a');
         assert.equal(resumed.status, 'active');
         assert.equal(resumed.stepIndex, 0);
