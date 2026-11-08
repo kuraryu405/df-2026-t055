@@ -3,7 +3,7 @@ import { uploadVideo } from './upload.ts';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, draftPatchSchema, sessionStartSchema, type Member, type LearnerSessionDTO } from '../../../packages/shared/src/index.ts';
-import { learnerProfileCreateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
+import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
 import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
 import { media } from './media.ts';
@@ -155,10 +155,23 @@ export function createApp(options: {
     });
     api.patch('/learners/:id', async (req, res) => {
         staff(res);
-        const l = await get('learners', req.params.id, res);
-        const { preferences } = z.object({ preferences: z.object({ sentenceLength: z.number().int().min(1).max(40), splitHints: z.string().max(200), audioGuidance: z.boolean() }).strict() }).strict().parse(req.body);
-        await db.put('learners', { ...l, preferences });
-        send(res, { learnerId: l.id });
+        await get('learners', req.params.id, res);
+        const { expectedRevision, disabilityInfo, ...changes } = learnerProfileUpdateRequestSchema.parse(req.body);
+        const detail = await db.transaction(async () => {
+            const learner = await get('learners', req.params.id, res);
+            const revision = learner.revision ?? 1;
+            if (revision !== expectedRevision)
+                fail(409, 'REVISION_CONFLICT');
+            const updated: Doc = { ...learner, ...changes, updatedBy: member(res).uid, revision: revision + 1 };
+            if (disabilityInfo === null)
+                delete updated.disabilityInfo;
+            else if (disabilityInfo !== undefined)
+                updated.disabilityInfo = disabilityInfo;
+            const detail = learnerProfileDetail(updated);
+            await db.put('learners', updated);
+            return detail;
+        });
+        res.json(detail);
     });
     api.post('/tasks/:id/generations', async (req, res) => {
         staff(res);

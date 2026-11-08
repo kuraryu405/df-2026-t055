@@ -103,3 +103,96 @@ test('未知キー・null・表示名欠落を拒否して保存しない', asyn
         assert.equal((await h.request('/learners', 'POST', body)).status, 422);
     assert.equal(h.db.all('learners').length, 2);
 });
+
+test('revision付き更新は指定項目を置き換え、詳細と保存済みの識別情報を保つ', async () => {
+    const h = harness();
+    const before = h.db.get('learners', 'a')!;
+    const updated = await h.request('/learners/a', 'PATCH', {
+        expectedRevision: 1, displayName: '架空の更新名', preferences: { audioGuidance: false },
+        learnerWishes: [], staffObservations: ['架空の観察'],
+        staffSuggestions: ['架空の提案'], confirmedGuidance: ['架空の確認済み配慮']
+    });
+    assert.equal(updated.status, 200);
+    const detail = learnerProfileDetailSchema.parse(updated.data);
+    assert.equal(detail.displayName, '架空の更新名');
+    assert.deepEqual(detail.preferences, { audioGuidance: false });
+    assert.equal(detail.revision, 2);
+    assert.equal(detail.updatedBy, 'staff');
+    assert.deepEqual(detail.learnerWishes, []);
+    assert.deepEqual(detail.staffObservations, ['架空の観察']);
+    assert.deepEqual(detail.staffSuggestions, ['架空の提案']);
+    assert.deepEqual(detail.confirmedGuidance, ['架空の確認済み配慮']);
+    for (const key of ['id', 'orgId', 'enteredBy', 'createdAt'])
+        assert.equal(h.db.get('learners', 'a')![key], before[key]);
+    const fetched = await h.request('/learners/a');
+    assert.equal(fetched.status, 200);
+    assert.deepEqual(fetched.data, detail);
+    const renamed = await h.request('/learners/a', 'PATCH', { expectedRevision: 2, displayName: '架空の再更新名' });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.data.revision, 3);
+    assert.deepEqual(renamed.data.preferences, detail.preferences);
+    assert.deepEqual(renamed.data.staffObservations, detail.staffObservations);
+});
+
+test('古いrevisionと同じrevisionの再送は409で保存値を変えない', async () => {
+    const h = harness();
+    const stale = await h.request('/learners/a', 'PATCH', { expectedRevision: 0, displayName: '架空の古い更新' });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.data.error.code, 'REVISION_CONFLICT');
+    const body = { expectedRevision: 1, displayName: '架空の更新名' };
+    assert.equal((await h.request('/learners/a', 'PATCH', body)).status, 200);
+    const saved = h.db.get('learners', 'a');
+    const repeated = await h.request('/learners/a', 'PATCH', body);
+    assert.equal(repeated.status, 409);
+    assert.equal(repeated.data.error.code, 'REVISION_CONFLICT');
+    assert.deepEqual(h.db.get('learners', 'a'), saved);
+});
+
+test('障害情報は省略で保持、完全なオブジェクトで置換、nullでキーごと削除する', async () => {
+    const h = harness();
+    const disabilityInfo = { detail: '架空の支援情報', source: '架空の本人確認', confirmedAt: '2026-11-08T00:00:00Z' };
+    const created = await h.request('/learners', 'POST', { displayName: '架空', disabilityInfo });
+    assert.equal(created.status, 201);
+    const path = `/learners/${created.data.learnerId}`;
+    const kept = await h.request(path, 'PATCH', { expectedRevision: 1, displayName: '架空の更新名' });
+    assert.equal(kept.status, 200);
+    assert.deepEqual(kept.data.disabilityInfo, disabilityInfo);
+    const replacement = { ...disabilityInfo, detail: '架空の見直し後の情報' };
+    const replaced = await h.request(path, 'PATCH', { expectedRevision: 2, disabilityInfo: replacement });
+    assert.equal(replaced.status, 200);
+    assert.deepEqual(replaced.data.disabilityInfo, replacement);
+    const saved = h.db.get('learners', created.data.learnerId);
+    assert.equal((await h.request(path, 'PATCH', { expectedRevision: 3, disabilityInfo: { detail: '架空' } })).status, 422);
+    assert.deepEqual(h.db.get('learners', created.data.learnerId), saved);
+    const removed = await h.request(path, 'PATCH', { expectedRevision: 3, disabilityInfo: null });
+    assert.equal(removed.status, 200);
+    assert.equal(removed.data.revision, 4);
+    assert.equal(Object.hasOwn(removed.data, 'disabilityInfo'), false);
+    assert.equal(Object.hasOwn(h.db.get('learners', created.data.learnerId)!, 'disabilityInfo'), false);
+    const fetched = await h.request(path);
+    assert.equal(fetched.status, 200);
+    assert.equal(Object.hasOwn(fetched.data, 'disabilityInfo'), false);
+});
+
+test('更新の未知キー・対象外null・expectedRevision欠落は422で保存しない', async () => {
+    const h = harness();
+    const before = h.db.get('learners', 'a');
+    for (const body of [
+        { expectedRevision: 1, displayName: null }, { displayName: '架空' },
+        { expectedRevision: 1, orgId: 'other' }, { expectedRevision: 1, preferences: null },
+        { expectedRevision: 1, preferences: { audioGuidance: null } },
+        { expectedRevision: 1, preferences: { unknown: true } }
+    ]) {
+        assert.equal((await h.request('/learners/a', 'PATCH', body)).status, 422);
+        assert.deepEqual(h.db.get('learners', 'a'), before);
+    }
+});
+
+test('プロフィール更新は職員のみで所属・対象の存在を検査する', async () => {
+    const h = harness();
+    const before = h.db.all('learners');
+    for (const token of ['learner-a', 'newcomer', 'other-staff', ''])
+        assert.equal((await h.request('/learners/a', 'PATCH', { expectedRevision: 1, displayName: '架空' }, token)).status, token ? 403 : 401);
+    assert.equal((await h.request('/learners/missing', 'PATCH', { expectedRevision: 1, displayName: '架空' })).status, 404);
+    assert.deepEqual(h.db.all('learners'), before);
+});

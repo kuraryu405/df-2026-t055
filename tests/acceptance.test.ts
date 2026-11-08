@@ -537,9 +537,9 @@ test('音声ありの承認は確認済み短文だけを渡し、版専用音�
 
 test('音声なしはTTSを呼ばずDTOにも含めない・プロフィールをbooleanで更新できる', async () => {
     const h = await harness(30, new FakeModel(), false, { synthesize: async () => { throw Error('must not be called'); } });
-    await h.ok('/learners/a', 'PATCH', { preferences: { sentenceLength: 40, splitHints: '9工程', audioGuidance: true } });
+    await h.ok('/learners/a', 'PATCH', { expectedRevision: 1, preferences: { sentenceLength: 40, splitHints: '9工程', audioGuidance: true } });
     assert.equal(h.db.get('learners', 'a')!.preferences.audioGuidance, true);
-    await h.ok('/learners/a', 'PATCH', { preferences: { sentenceLength: 40, splitHints: '9工程', audioGuidance: false } });
+    await h.ok('/learners/a', 'PATCH', { expectedRevision: 2, preferences: { sentenceLength: 40, splitHints: '9工程', audioGuidance: false } });
     const { taskId } = await h.task();
     const { draft } = await h.generate(taskId);
     const r = await h.approve(draft);
