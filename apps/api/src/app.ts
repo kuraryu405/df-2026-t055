@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { releaseCopyRequestSchema, releaseCopyResponseSchema, draftDetailSchema, editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, normalizeRelease, projectReleaseToSessionSteps, learnerSessionSchema, type Member } from '../../../packages/shared/src/index.ts';
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
-import { supportOperationRequestSchema, supportStartResponseSchema, supportAcknowledgeResponseSchema, supportClaimResponseSchema, supportRequestListResponseSchema, supportRequestStatusQuerySchema } from '../../../packages/shared/src/support.ts';
+import { supportRecordSchema, supportRecordSaveRequestSchema, supportOperationRequestSchema, supportStartResponseSchema, supportAcknowledgeResponseSchema, supportClaimResponseSchema, supportRequestListResponseSchema, supportRequestStatusQuerySchema } from '../../../packages/shared/src/support.ts';
 import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
 import { media } from './media.ts';
@@ -612,6 +612,47 @@ export function createApp(options: {
                 fail(403, 'NOT_ASSIGNED');
             const response = supportAcknowledgeResponseSchema.parse({ schemaVersion: '1', status: 'acknowledged', acknowledgedAt: now() });
             await db.put('supportRequests', { ...q, status: response.status, acknowledgedAt: response.acknowledgedAt, acknowledgedBy: member(res).uid, revision: q.revision + 1 });
+            return response;
+        });
+        res.json(result);
+    });
+    const recordDto = (record: Doc) => {
+        const { id, orgId, ...fields } = record;
+        return supportRecordSchema.parse({ ...fields, schemaVersion: '1', recordId: id });
+    };
+    api.get('/support-requests/:id/record', async (req, res) => {
+        staff(res);
+        await get('supportRequests', req.params.id, res);
+        res.json(recordDto(await get('supportRecords', req.params.id, res)));
+    });
+    api.put('/support-requests/:id/record', async (req, res) => {
+        staff(res);
+        const { expectedRevision, ...text } = supportRecordSaveRequestSchema.parse(req.body);
+        const result = await db.transaction(async () => {
+            const q = await get('supportRequests', req.params.id, res);
+            if (q.kind !== 'help' || !['in_progress', 'acknowledged'].includes(q.status))
+                fail(409, 'INVALID_STATE');
+            const session = await get('sessions', q.sessionId, res);
+            const release = await get('releases', session.releaseId, res);
+            const event = await get('sessionEvents', q.eventId, res);
+            if (release.learnerId !== session.learnerId || event.sessionId !== session.id || event.type !== 'help' ||
+                !release.learnerSteps.some((step: any) => step.stepId === event.stepId))
+                fail(409, 'INVALID_STATE');
+            // The request UUID is also the record UUID, so concurrent first saves cannot create duplicates.
+            const prior = await db.get('supportRecords', q.id);
+            if (prior && prior.orgId !== member(res).orgId)
+                fail(403, 'ORG_FORBIDDEN');
+            if ((prior?.revision ?? 0) !== expectedRevision)
+                fail(409, 'REVISION_CONFLICT');
+            const timestamp = now();
+            const record = doc(q.orgId, {
+                id: q.id, supportRequestId: q.id, sessionId: session.id, learnerId: session.learnerId,
+                taskId: release.taskId, releaseId: release.id, stepId: event.stepId, ...text,
+                createdBy: prior?.createdBy ?? member(res).uid, createdAt: prior?.createdAt ?? timestamp,
+                updatedBy: member(res).uid, updatedAt: timestamp, revision: expectedRevision + 1
+            });
+            const response = recordDto(record);
+            await db.put('supportRecords', record);
             return response;
         });
         res.json(result);
