@@ -8,3 +8,8 @@
 .learner .controls,.learner .safety{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .learner{padding-bottom:16em}.learner .safety{position:fixed;bottom:0;margin:0}
 @media(max-width:760px){.learner .controls,.learner .safety{grid-template-columns:minmax(0,1fr);gap:12px}.learner .safety{padding:12px}}
+.learner .state-icon{display:block;width:4em;height:4em;margin:0 auto;color:currentColor}
+.staff-support .support-tabs{display:flex;flex-wrap:wrap;gap:8px}
+.staff-support button[aria-pressed=true]{background:#236d58;color:white;border:3px solid #174e4b}
+.staff-support .record-conflict{padding:16px;border:2px solid #b0882b;border-radius:8px;background:#fff8df;overflow-wrap:anywhere}
+.staff-support p{overflow-wrap:anywhere}

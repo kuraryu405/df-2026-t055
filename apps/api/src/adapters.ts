@@ -112,7 +112,7 @@ export function doc(orgId: string, fields: Record<string, any>): Doc {
     };
 }
 export function seed(db: MemoryRepository) {
-    for (const [uid, role, learnerId, orgId] of [['staff', 'staff', undefined, 'demo'], ['learner-a', 'learner', 'a', 'demo'], ['learner-b', 'learner', 'b', 'demo'], ['newcomer', 'newcomer', undefined, 'demo'], ['other-staff', 'staff', undefined, 'other']] as const)
+    for (const [uid, role, learnerId, orgId] of [['staff', 'staff', undefined, 'demo'], ['staff-2', 'staff', undefined, 'demo'], ['learner-a', 'learner', 'a', 'demo'], ['learner-b', 'learner', 'b', 'demo'], ['newcomer', 'newcomer', undefined, 'demo'], ['other-staff', 'staff', undefined, 'other']] as const)
         db.put('members', doc(orgId, {
             id: uid, uid, role, learnerId
         }));

@@ -21,7 +21,7 @@ source = source.slice(source.indexOf('function Learner('), source.indexOf('\ncre
 const imports = `import React,{useState,useEffect,useRef} from ${JSON.stringify(hookUrl)};
 import {learnerControlPath} from ${JSON.stringify(new URL('../apps/web/src/learner-controls.ts',import.meta.url).href)};
 import {learnerStepPresentation} from ${JSON.stringify(new URL('../apps/web/src/learner-display.ts',import.meta.url).href)};
-import {hold,readSafety,flushSafety,safetyKey,clearWaiting} from ${JSON.stringify(new URL('../apps/web/src/safety.ts',import.meta.url).href)};
+import {hold,readSafety,flushSafety,safetyKey,clearWaiting,readSessionStart,beginSessionStart,holdStartIntent,startKey} from ${JSON.stringify(new URL('../apps/web/src/safety.ts',import.meta.url).href)};
 const api=(...args)=>globalThis.learnerApi(...args), account='learner-a', Asset=()=>null;
 const subscribeSupport=()=>()=>{}, getToken=async()=>account;
 export `;
@@ -51,7 +51,7 @@ function harness(initial:any) {
         return structuredClone(server);
     }});
     const render=()=>{hooks.begin();return Learner({uid:'learner-a',path:'/me/sessions/session',action:async(fn:any)=>fn()});};
-    return {render,calls,storage,setStatus:(status:string)=>server.status=status};
+    return {render,calls,storage,setStatus:(status:string)=>{server.status=status;if(status==='waiting_help'){server.revision++;server.support={requestId:'q',status:'acknowledged',revision:4};}}};
 }
 async function open(h:ReturnType<typeof harness>){h.render();const timer=globalThis.setInterval;globalThis.setInterval=(()=>0) as any;try{await hooks.flush();}finally{globalThis.setInterval=timer;}return h.render();}
 async function click(tree:any,label:string){button(tree,label).props.onClick();await new Promise(r=>setImmediate(r));}

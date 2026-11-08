@@ -219,7 +219,7 @@ Cloud Storageは`source/{orgId}/{taskId}/...`、`draft/{orgId}/{draftId}/...`、
 | `POST /me/sessions` | 本人 | `{taskId,clientRequestId}` → `{sessionId,releaseId,displayMode,audioGuidance,steps}`。固定した版の許可フィールドで組み立てる |
 | `GET /me/sessions/{id}` | 本人 | 固定版の手順・表示方法・読み上げの設定とセッション状態。支援待ちでは `support:{requestId,status,revision}` も返す |
 | `POST /me/sessions/{id}/events` | 本人 | `{clientEventId,expectedRevision,type: next / back / help / resume / stop / complete}` → `{status,stepIndex,revision,support?}`。helpでは要求を作り、対象IDをセッションに保存する。resumeはその要求の対応完了後に限る |
-| `GET /support-requests` | 職員 | `open`・`assigned`・`in_progress` の要求一覧。記録の後入力では `?status=acknowledged` で対応完了した要求を取得できる |
+| `GET /support-requests` | 職員 | `open`・`assigned`・`in_progress` の要求一覧。記録の後入力では `?status=acknowledged` で対応完了した要求を取得できる。対象情報を照合できる要求には職員専用の `context` を付ける（本人の表示名・作業名・対象工程・固定版・セッション状態とrevision・操作できるactions）。職員メモやプロフィール詳細は含めない |
 | `POST /support-requests/{id}/claim` | 職員 | `{}` → `{status:"assigned",assignedTo,assignedAt,revision}`。helpの担当を自分にする。別の職員が担当済みなら409 |
 | `POST /support-requests/{id}/start` | 担当職員 | `{}` → `{status,startedAt}`。対象はassignedのhelp。初回はin_progressにする |
 | `POST /support-requests/{id}/acknowledge` | 職員 | `{}` → `{status:"acknowledged",acknowledgedAt}`。helpは担当職員が対応完了を記録する。stopは同じ所属の職員が通知を確認する |
@@ -241,6 +241,8 @@ Cloud Storageは`source/{orgId}/{taskId}/...`、`draft/{orgId}/{draftId}/...`、
 `/api/v1/ws`でWebSocket接続を受ける。職員は支援一覧を開いている間、本人は支援待ちの間に接続する。ブラウザは初回メッセージでFirebase IDトークンを渡す。サーバーはトークン・members・Originを検査してから購読を許可する。認証前の接続は5秒で閉じ、トークンをURLやログに残さない。有効期限切れでは切断し、再認証して接続し直す。
 
 職員には同じ所属の支援一覧、本人には自分のセッションと支援状態の変更だけを通知する。本人向け通知には職員メモ・支援記録・プロフィールを含めない。更新操作は上表の認証付きHTTP APIで受け、Firestoreへの保存後に通知する。担当職員が職員用画面で操作すると、本人のiPadは通知された保存済みの状態を表示する。
+
+職員一覧の `context` はHTTPとWebSocketで同じ許可フィールドから作り、操作候補は認証済み職員の担当・要求状態・現在のセッションから算出する。`claim / start / acknowledge / resume / record` を区別し、本人向けの `support` には要求ID・状態・revisionだけを返す。古いデータ等で対象情報を照合できない場合は `context` を省略し、画面は対象や操作権限を推測しない。操作候補の表示とは別に、変更APIで毎回認可・状態を検査する。
 
 サーバーは接続直後と再接続時に最新状態を送り直す。ブラウザはセッションと支援要求のrevisionを確認して古い通知を除き、再接続だけでは作業を再開しない。通信断中は支援待ちを保ち、HTTPで3秒ごとに最新状態を確認する。支援終了または画面を閉じたときに不要な接続を閉じる。本人が「やめる」を押した端末では、未送信の停止が残っていても停止表示を維持し、再開通知で作業へ戻さない。サーバーも停止済みセッションの再開を拒否する。
 

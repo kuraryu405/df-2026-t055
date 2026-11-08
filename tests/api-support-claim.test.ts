@@ -47,7 +47,7 @@ async function harness() {
         const response = await request(`/me/sessions/${session.sessionId}/events`, 'POST', {
             clientEventId: crypto.randomUUID(), expectedRevision: session.revision, type: kind
         }, 'learner-a');
-        assert.deepEqual(Object.keys(response).sort(), ['revision', 'schemaVersion', 'status', 'stepIndex']);
+        assert.deepEqual(Object.keys(response).sort(), ['revision', 'schemaVersion', 'status', 'stepIndex', ...(kind === 'help' ? ['support'] : [])]);
         return db.all('supportRequests').find(q => q.sessionId === session.sessionId)!;
     }
     const list = async (query = '', token = 'staff') => supportRequestListResponseSchema.parse(await request(`/support-requests${query}`, 'GET', undefined, token)).requests;

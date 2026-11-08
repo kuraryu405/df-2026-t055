@@ -1,4 +1,6 @@
 import { supportWebSocket, supportRequestDto } from './support-ws.ts';
+import { staffSupportView, sessionSupportSummary } from './support-view.ts';
+import { supportSessionEventResponseSchema } from '../../../packages/shared/src/support.ts';
 import http, { type Request, type Response, type NextFunction } from './http.ts';
 import { uploadVideo } from './upload.ts';
 import { createHash } from 'node:crypto';
@@ -456,10 +458,12 @@ export function createApp(options: {
             const { audioAssetId, ...silent } = step;
             return silent;
         });
+        const support = await sessionSupportSummary(db, s);
         return learnerSessionSchema.parse({
             schemaVersion: '1', sessionId: s.id, releaseId: release.releaseId,
             displayMode: release.displayMode, audioGuidance: release.audioGuidance, steps,
-            status: s.status, stepIndex: s.stepIndex, revision: s.revision
+            status: s.status, stepIndex: s.stepIndex, revision: s.revision,
+            ...(support ? { support } : {})
         });
     }
     api.get('/me/assignments', async (req, res) => {
@@ -488,7 +492,7 @@ export function createApp(options: {
     });
     api.get('/me/sessions/:id', async (req, res) => {
         role(res, 'learner');
-        res.json(await dto(own(await get('sessions', req.params.id, res), res)));
+        res.json(await db.transaction(async () => dto(own(await get('sessions', req.params.id, res), res))));
     });
     api.post('/me/sessions/:id/events', async (req, res) => {
         role(res, 'learner');
@@ -562,16 +566,21 @@ export function createApp(options: {
             return s;
         });
         notifications.publish(member(res).orgId, req.params.id);
-        send(res, { status: result.status, stepIndex: result.stepIndex, revision: result.revision });
+        res.json(await db.transaction(async () => {
+            const saved = own(await get('sessions', req.params.id, res), res);
+            const support = await sessionSupportSummary(db, saved);
+            return supportSessionEventResponseSchema.parse({ schemaVersion: '1', status: saved.status,
+                stepIndex: saved.stepIndex, revision: saved.revision, ...(support ? { support } : {}) });
+        }));
     });
     api.get('/support-requests', async (req, res) => {
         staff(res);
         if (req.searchParams.getAll('status').length > 1)
             fail(422, 'INVALID_INPUT');
         const { status } = supportRequestStatusQuerySchema.parse(Object.fromEntries(req.searchParams));
-        const requests = (await list('supportRequests', res))
+        const requests = await db.transaction(async () => Promise.all((await list('supportRequests', res))
             .filter(q => status ? q.status === status : ['open', 'assigned', 'in_progress'].includes(q.status))
-            .map(supportRequestDto);
+            .map(q => staffSupportView(db, q, member(res)))));
         res.json(supportRequestListResponseSchema.parse({ requests }));
     });
     api.post('/support-requests/:id/claim', async (req, res) => {

@@ -5,16 +5,8 @@ import type { Duplex } from 'node:stream';
 import type { Auth, Repository, Doc } from './adapters.ts';
 import type { Member } from '../../../packages/shared/src/index.ts';
 import { supportWsAuthSchema, supportRequestSchema, staffSupportNotificationSchema, learnerSupportNotificationSchema } from '../../../packages/shared/src/support.ts';
-
-export function supportRequestDto(q: Doc) {
-    return supportRequestSchema.parse({
-        schemaVersion: '1', requestId: q.id, sessionId: q.sessionId, eventId: q.eventId,
-        kind: q.kind, status: q.status, revision: q.revision, createdAt: q.createdAt,
-        ...(q.kind === 'help' && q.status !== 'open' ? { assignedTo: q.assignedTo, assignedAt: q.assignedAt } : {}),
-        ...(q.kind === 'help' && ['in_progress', 'acknowledged'].includes(q.status) ? { startedBy: q.startedBy, startedAt: q.startedAt } : {}),
-        ...(q.status === 'acknowledged' ? { acknowledgedBy: q.acknowledgedBy, acknowledgedAt: q.acknowledgedAt } : {})
-    });
-}
+import { staffSupportView, sessionSupportSummary } from './support-view.ts';
+export { supportRequestDto } from './support-view.ts';
 
 // Bounded RFC 6455 transport: only the small JSON auth message is accepted from clients.
 function connection(socket: Duplex, onMessage: (value: string) => void, onClose: () => void) {
@@ -92,14 +84,13 @@ export function supportWebSocket(db: Repository, auth: Auth) {
         // Serialize reads with mutations so session and support revisions describe one saved state.
         const value = await db.transaction(async () => {
             if (m.role === 'staff') return staffSupportNotificationSchema.parse({ schemaVersion: '1', type: 'support.snapshot',
-                requests: (await db.all('supportRequests')).filter(q => q.orgId === m.orgId && q.status !== 'acknowledged').map(supportRequestDto) });
+                requests: await Promise.all((await db.all('supportRequests')).filter(q => q.orgId === m.orgId && q.status !== 'acknowledged').map(q => staffSupportView(db, q, m))) });
             const s = await db.get('sessions', client.sessionId!);
             if (!s || s.orgId !== m.orgId || s.learnerId !== m.learnerId) throw Error('FORBIDDEN');
-            const q = s.activeSupportRequestId ? await db.get('supportRequests', s.activeSupportRequestId) : undefined;
-            if (q && (q.orgId !== m.orgId || q.sessionId !== s.id)) throw Error('FORBIDDEN');
+            const support = await sessionSupportSummary(db, s);
             return learnerSupportNotificationSchema.parse({ schemaVersion: '1', type: 'session.support.snapshot', payload: {
                 schemaVersion: '1', sessionId: s.id, releaseId: s.releaseId, status: s.status, stepIndex: s.stepIndex, revision: s.revision,
-                ...(q ? { support: { requestId: q.id, status: q.status, revision: q.revision } } : {})
+                ...(support ? { support } : {})
             } });
         });
         if (clients.has(client) && client.expiresAt > Date.now()) client.send(value);

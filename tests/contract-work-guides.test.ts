@@ -44,6 +44,14 @@ test('old releases and sessions normalize to mandatory presentation fields', () 
     assert.deepEqual(c.normalizeLearnerSessionDTO(fixture('session-photo-only-valid')), fixture('session-photo-only-valid'));
     assert.equal(c.learnerSessionSchema.safeParse(oldSession).success, false);
 });
+test('waiting session may carry the support summary required by the spec', () => {
+    const s = fixture('session-photo-text-valid');
+    const waiting = { ...s, status: 'waiting_help', support: { requestId: 'req-1', status: 'open', revision: 1 } };
+    assert.equal(c.learnerSessionSchema.parse(waiting).support?.status, 'open');
+    assert.equal(c.learnerSessionSchema.safeParse({ ...waiting, support: { requestId: 'req-1', status: 'bogus', revision: 1 } }).success, false);
+    assert.equal(c.learnerSessionSchema.safeParse({ ...waiting, support: { requestId: 'req-1', status: 'open', revision: 1, learnerId: 'x' } }).success, false);
+});
+
 test('photo-only projection removes text keys while internal release retains staff content', () => {
     const release = c.releaseSchema.parse(fixture('release-photo-only-valid'));
     assert.ok(release.learnerSteps[0].text); assert.ok(release.learnerSteps[0].visibleCaution); assert.ok(release.staffGuide[0].coaching);
