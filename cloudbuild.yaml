@@ -1,0 +1,18 @@
+# Build/push only. Deployment is a separate, explicitly authorized operation.
+steps:
+  - name: node:24-bookworm
+    entrypoint: sh
+    args: ['-ec', './scripts/prepare-containers.sh && ./scripts/fetch-ffmpeg.sh']
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '--platform=linux/amd64', '-f', 'deploy/Dockerfile.web-api', '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/web-api:${_TAG}', '.']
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '--platform=linux/amd64', '-f', 'deploy/Dockerfile.generator', '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/generator:${_TAG}', '.']
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/web-api:${_TAG}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/generator:${_TAG}'
+substitutions:
+  _REGION: asia-northeast1
+  _REPOSITORY: t055
+  _TAG: '${BUILD_ID}'
+options:
+  dynamicSubstitutions: true

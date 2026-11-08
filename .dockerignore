@@ -1,0 +1,8 @@
+**
+!.containers/
+!.containers/runtime/
+!.containers/runtime/**
+!.containers/ffmpeg/
+!.containers/ffmpeg/**
+!deploy/
+!deploy/Dockerfile.*

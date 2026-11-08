@@ -35,3 +35,6 @@ Thumbs.db
 
 # ローカルMVPの非公開資産
 .local/
+
+# Prepared container context (dependencies and downloaded GPL binaries)
+.containers/

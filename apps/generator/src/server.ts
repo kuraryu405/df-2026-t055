@@ -16,7 +16,7 @@ app.post('/api/v1/internal/generate', async (req, res) => {
     }
 });
 // Local Cloud Tasks substitute: recover queued jobs and expired leases using a private API-side poll.
-app.listen(Number(process.env.GENERATOR_PORT ?? 3002), '127.0.0.1', () => console.log('Local generator :3002'));
+app.listen(Number(process.env.GENERATOR_PORT ?? 3002), process.env.LISTEN_HOST ?? '127.0.0.1');
 let running = false;
 setInterval(async () => {
     if (running)

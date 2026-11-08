@@ -1,0 +1,6 @@
+FROM node:24-alpine
+COPY .containers/runtime/ /app/
+COPY .containers/ffmpeg/ /usr/local/bin/
+ENV NODE_ENV=production PORT=8080 LISTEN_HOST=0.0.0.0 TMPDIR=/tmp
+USER node
+CMD ["/bin/sh", "-ec", "cd /app; export GENERATOR_PORT=${GENERATOR_PORT:-${PORT:-8080}}; exec node --experimental-transform-types apps/generator/src/server.ts"]

@@ -18,4 +18,4 @@ const { app } = createApp({
 app.get('/', (_req, res) => res.sendFile(resolve('apps/web/dist/index.html')));
 app.use(http.static(resolve('apps/web/dist')));
 app.get(/^\/(staff|me|handover)(\/.*)?$/, (_req, res) => res.sendFile(resolve('apps/web/dist/index.html')));
-app.listen(Number(process.env.API_PORT ?? 3001), '127.0.0.1', () => console.log('Local API :3001 (configured model / in-memory store)'));
+app.listen(Number(process.env.API_PORT ?? 3001), process.env.LISTEN_HOST ?? '127.0.0.1');
