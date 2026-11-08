@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "REVISION_CONFLICT",
+    "message": "再取得して編集し直してください",
+    "requestId": "demo-request-conflict"
+  }
+}

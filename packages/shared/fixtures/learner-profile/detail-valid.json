@@ -1,0 +1,33 @@
+{
+  "displayName": "架空の作業者A",
+  "preferences": {
+    "sentenceLength": 20,
+    "splitHints": "手を持ち替えるところで区切る",
+    "displayMode": "photo_only",
+    "audioGuidance": false
+  },
+  "learnerWishes": [
+    "写真で確認したい"
+  ],
+  "staffObservations": [
+    "見本の写真を指して確認した"
+  ],
+  "staffSuggestions": [
+    "帯紙の位置を写真で示すことを提案"
+  ],
+  "confirmedGuidance": [
+    "説明後は返答を待つ"
+  ],
+  "disabilityInfo": {
+    "detail": "架空例：本人が共有を希望した支援上の情報",
+    "source": "架空の本人との確認",
+    "confirmedAt": "2026-11-08T09:00:00+09:00"
+  },
+  "schemaVersion": "1",
+  "learnerId": "demo-learner-a",
+  "orgId": "demo-org",
+  "enteredBy": "demo-staff",
+  "updatedBy": "demo-staff",
+  "revision": 1,
+  "createdAt": "2026-11-08T00:00:00Z"
+}

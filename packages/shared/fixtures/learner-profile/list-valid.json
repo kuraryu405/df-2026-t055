@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "schemaVersion": "1",
+      "learnerId": "demo-learner-a",
+      "displayName": "架空の作業者A",
+      "preferences": {
+        "sentenceLength": 20,
+        "splitHints": "手を持ち替えるところで区切る",
+        "displayMode": "photo_only",
+        "audioGuidance": false
+      },
+      "revision": 1
+    }
+  ]
+}
