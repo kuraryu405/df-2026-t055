@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1",
+  "recordId": "demo-record",
+  "supportRequestId": "demo-request-help",
+  "learnerId": "demo-learner",
+  "taskId": "demo-task",
+  "releaseId": "demo-release",
+  "stepId": "demo-step",
+  "sessionId": "demo-session",
+  "createdBy": "demo-staff",
+  "updatedBy": "demo-staff",
+  "createdAt": "2026-11-08T01:00:00Z",
+  "updatedAt": "2026-11-08T01:00:00Z",
+  "revision": 1,
+  "observedDifficulty": "帯紙を押さえる位置で手が止まった。",
+  "assistanceGiven": "",
+  "improvementSuggestion": ""
+}

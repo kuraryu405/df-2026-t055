@@ -1,0 +1,4 @@
+{
+  "type": "auth",
+  "idToken": "fictional-token-not-valid"
+}

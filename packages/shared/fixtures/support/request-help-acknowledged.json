@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1",
+  "requestId": "demo-request-help",
+  "sessionId": "demo-session",
+  "eventId": "demo-event",
+  "revision": 4,
+  "createdAt": "2026-11-08T01:00:00Z",
+  "kind": "help",
+  "status": "acknowledged",
+  "assignedTo": "demo-staff",
+  "assignedAt": "2026-11-08T01:00:00Z",
+  "startedBy": "demo-staff",
+  "startedAt": "2026-11-08T01:00:00Z",
+  "acknowledgedBy": "demo-staff",
+  "acknowledgedAt": "2026-11-08T01:00:00Z"
+}

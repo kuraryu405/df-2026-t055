@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1",
+  "type": "support.updated",
+  "request": {
+    "schemaVersion": "1",
+    "requestId": "demo-request-help",
+    "sessionId": "demo-session",
+    "eventId": "demo-event",
+    "revision": 2,
+    "createdAt": "2026-11-08T01:00:00Z",
+    "kind": "help",
+    "status": "assigned",
+    "assignedTo": "demo-staff",
+    "assignedAt": "2026-11-08T01:00:00Z"
+  }
+}
