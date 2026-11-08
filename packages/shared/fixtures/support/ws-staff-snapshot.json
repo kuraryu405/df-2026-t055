@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1",
+  "type": "support.snapshot",
+  "requests": [
+    {
+      "schemaVersion": "1",
+      "requestId": "demo-request-help",
+      "sessionId": "demo-session",
+      "eventId": "demo-event",
+      "revision": 3,
+      "createdAt": "2026-11-08T01:00:00Z",
+      "kind": "help",
+      "status": "in_progress",
+      "assignedTo": "demo-staff",
+      "assignedAt": "2026-11-08T01:00:00Z",
+      "startedBy": "demo-staff",
+      "startedAt": "2026-11-08T01:00:00Z"
+    },
+    {
+      "schemaVersion": "1",
+      "requestId": "demo-request-stop",
+      "sessionId": "demo-session-stop",
+      "eventId": "demo-event-stop",
+      "revision": 1,
+      "createdAt": "2026-11-08T01:00:00Z",
+      "kind": "stop",
+      "status": "open"
+    }
+  ]
+}

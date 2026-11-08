@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1",
+  "type": "session.support.updated",
+  "payload": {
+    "schemaVersion": "1",
+    "sessionId": "demo-session",
+    "releaseId": "demo-release",
+    "status": "waiting_help",
+    "stepIndex": 0,
+    "revision": 2,
+    "support": {
+      "requestId": "demo-request-help",
+      "status": "assigned",
+      "revision": 2
+    },
+    "supportRecord": {
+      "observedDifficulty": "帯紙を押さえる位置で手が止まった。",
+      "assistanceGiven": "",
+      "improvementSuggestion": ""
+    }
+  }
+}

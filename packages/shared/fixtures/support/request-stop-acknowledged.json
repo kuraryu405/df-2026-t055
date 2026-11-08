@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1",
+  "requestId": "demo-request-stop",
+  "sessionId": "demo-session",
+  "eventId": "demo-event",
+  "revision": 2,
+  "createdAt": "2026-11-08T01:00:00Z",
+  "kind": "stop",
+  "status": "acknowledged",
+  "acknowledgedBy": "demo-staff",
+  "acknowledgedAt": "2026-11-08T01:00:00Z"
+}

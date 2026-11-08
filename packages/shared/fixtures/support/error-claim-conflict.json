@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "別の職員が担当済みです。",
+    "requestId": "demo-http-request"
+  }
+}
