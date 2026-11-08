@@ -1,0 +1,38 @@
+{
+  "expectedRevision": 0,
+  "editedSteps": [
+    {
+      "stepId": "demo-step-1",
+      "text": "タオルを ひろげます",
+      "visibleCaution": "机の上で行います",
+      "imageAssetId": "demo-image-1",
+      "imageAltText": "机に広げた架空のタオル",
+      "sourceStartMs": 0,
+      "sourceEndMs": 1000,
+      "frameMs": 500,
+      "verifiedObservation": "タオルを広げる",
+      "verifiedSpeech": "ひろげよう",
+      "coaching": "端を指します",
+      "completionCheck": "全体が見える"
+    }
+  ],
+  "reviewChecks": {
+    "presentationConfirmed": false,
+    "flagResolution": "",
+    "steps": {
+      "demo-step-1": {
+        "videoVerified": false,
+        "photoTextVerified": false
+      }
+    }
+  },
+  "displayMode": "photo_only",
+  "audioGuidance": false,
+  "appliedSupportRecordRefs": [
+    {
+      "recordId": "demo-record-1",
+      "revision": 1
+    }
+  ],
+  "correctionReason": "写真を確認したため"
+}

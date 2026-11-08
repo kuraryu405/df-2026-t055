@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1",
+  "draftId": "demo-draft-1",
+  "taskId": "demo-task-1",
+  "learnerId": "fictional-learner-1",
+  "revision": 0,
+  "status": "editing",
+  "editedSteps": [
+    {
+      "stepId": "demo-step-1",
+      "text": "タオルを ひろげます",
+      "visibleCaution": "机の上で行います",
+      "imageAssetId": "demo-image-1",
+      "imageAltText": "机に広げた架空のタオル",
+      "sourceStartMs": 0,
+      "sourceEndMs": 1000,
+      "frameMs": 500,
+      "verifiedObservation": "タオルを広げる",
+      "verifiedSpeech": "ひろげよう",
+      "coaching": "端を指します",
+      "completionCheck": "全体が見える"
+    }
+  ],
+  "displayMode": "photo_text",
+  "audioGuidance": false,
+  "reviewChecks": {
+    "presentationConfirmed": false,
+    "flagResolution": "",
+    "steps": {
+      "demo-step-1": {
+        "videoVerified": false,
+        "photoTextVerified": false
+      }
+    }
+  },
+  "appliedSupportRecordRefs": [],
+  "updatedBy": "fictional-staff-1",
+  "sourceReleaseId": "demo-release-1"
+}

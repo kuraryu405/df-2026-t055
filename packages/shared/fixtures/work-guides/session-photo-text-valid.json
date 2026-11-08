@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1",
+  "sessionId": "demo-session-1",
+  "releaseId": "demo-release-1",
+  "status": "active",
+  "stepIndex": 0,
+  "revision": 0,
+  "displayMode": "photo_text",
+  "audioGuidance": false,
+  "steps": [
+    {
+      "stepId": "demo-step-1",
+      "imageAssetId": "demo-image-1",
+      "imageAltText": "机に広げた架空のタオル",
+      "text": "タオルを ひろげます",
+      "visibleCaution": "机の上で行います",
+      "order": 1
+    }
+  ]
+}
