@@ -1,3 +1,5 @@
+import { isManualDraft, releaseCopySource, beginReleaseCopy, type ReleaseCopyState } from './release-copy.ts';
+import { releaseCopyResponseSchema } from '../../../packages/shared/src/index.ts';
 import { missingDraftChecks, draftPreviewMode, savedDraftReview } from './draft-review.ts';
 import { StaffLearners } from './staff-learners.tsx';
 import { createTokenProvider } from './auth.ts';
@@ -127,11 +129,21 @@ function Draft({ id, action }: {
 }) {
     const [draft, setDraft] = useState<any>(), [task, setTask] = useState<any>(), [steps, setSteps] = useState<EditedStep[]>([]), [checks, setChecks] = useState<ReviewChecks>({ presentationConfirmed: false, flagResolution: '', steps: {} }), [release, setRelease] = useState<any>(), [busy, setBusy] = useState(false), [preview, setPreview] = useState<number | null>(null);
     const [displayMode, setDisplayMode] = useState<'photo_only' | 'photo_text'>('photo_text'), [audioGuidance, setAudioGuidance] = useState(false);
+    const [source, setSource] = useState('');
     const [previewMode, setPreviewMode] = useState<'photo_only' | 'photo_text'>('photo_text');
     const [error, setError] = useState(''), [conflict, setConflict] = useState(false), [latest, setLatest] = useState<any>();
     const sending = useRef(false);
     const previewTrigger = useRef<HTMLButtonElement | null>(null);
     const closePreview = () => { setPreview(null); previewTrigger.current?.focus(); };
+    const loadSource = async (d: any) => {
+        setSource('');
+        if (isManualDraft(d)) {
+            const approval = (await api(`/handover/releases/${d.sourceReleaseId}`)).release;
+            const summary = (await api('/handover/releases')).releases.find((r: any) => r.releaseId === d.sourceReleaseId);
+            if (!summary) throw Error('コピー元の承認版が見つかりません。再取得してください。');
+            setSource(releaseCopySource(summary, approval));
+        }
+    };
     const load = async () => {
         const d = (await api(`/drafts/${id}`)).draft;
         setDraft(d);
@@ -140,23 +152,25 @@ function Draft({ id, action }: {
         setSteps(d.editedSteps);
         setChecks(d.reviewChecks);
         setTask((await api(`/tasks/${d.taskId}`)).task);
+        await loadSource(d);
     };
     useEffect(() => {
         void action(load);
     }, [id]);
     useEffect(() => {
-        if (draft?.status !== 'generating')
+        if (!draft || isManualDraft(draft) || draft.status !== 'generating')
             return;
         const timer = setInterval(() => void action(load), 3000);
         return () => clearInterval(timer);
-    }, [draft?.status]);
+    }, [id, draft?.status, draft?.sourceReleaseId]);
     if (!draft)
         return <p>下書きを取得中…</p>;
     const change = (i: number, key: keyof EditedStep, value: string | number) => {
         setSteps(old => old.map((s, j) => i === j ? { ...s, [key]: value } : s));
         setChecks(c => ({ ...c, presentationConfirmed: false, steps: { ...c.steps, [steps[i].stepId]: { videoVerified: ['sourceStartMs', 'sourceEndMs', 'frameMs'].includes(key) ? false : (c.steps[steps[i].stepId]?.videoVerified ?? false), photoTextVerified: false } } }));
     };
-    const flagsRequired = !draft.sourceReleaseId && !!(draft.aiProposal?.reviewFlags.length || draft.aiProposal?.steps.some((s: any) => s.reviewFlags.length));
+    const manual = isManualDraft(draft);
+    const flagsRequired = !manual && !!(draft.aiProposal?.reviewFlags.length || draft.aiProposal?.steps.some((s: any) => s.reviewFlags.length));
     const missing = missingDraftChecks(steps, checks, flagsRequired);
     const run = async (fn: () => Promise<void>) => {
         if (sending.current) return;
@@ -175,6 +189,7 @@ function Draft({ id, action }: {
         setLatest(d);
         setDraft({ ...draft, revision: d.revision });
         setConflict(d.status !== 'editing');
+        if (isManualDraft(d) && !source) await loadSource(d);
         if (d.status !== 'editing') setError('最新の下書きは編集できない状態です。入力は保持しています。');
     };
     const save = async () => {
@@ -188,10 +203,10 @@ function Draft({ id, action }: {
             localStorage.removeItem(`approval:${id}`);
             if (draft.status === 'editing') void run(fetchLatest);
             else void action(load);
-        }}>{draft.status === 'editing' ? '最新値を取得' : '再取得'}</button></nav><h1>AIの下書き（解釈）</h1><p>本人：{draft.learnerId === 'a' ? 'Aさん（9工程）' : 'Bさん（折るを細分化・11工程）'} / revision {draft.revision} / {draft.status}</p>{draft.status === 'generating' ? <p role="status">動画解析中です。3秒ごとに状態を確認しています。</p> : draft.status === 'failed' ? <section><p role="alert">生成に失敗しました。本人用の手順は作成されていません。</p><button onClick={() => void action(async () => {
+        }}>{draft.status === 'editing' ? '最新値を取得' : '再取得'}</button></nav><h1>{manual ? '承認版のコピー' : 'AIの下書き（解釈）'}</h1>{manual && <p role="status">{source || 'コピー元の承認版を取得中です。'}</p>}<p>本人：{draft.learnerId === 'a' ? 'Aさん（9工程）' : 'Bさん（折るを細分化・11工程）'} / revision {draft.revision} / {draft.status}</p>{!manual && draft.status === 'generating' ? <p role="status">動画解析中です。3秒ごとに状態を確認しています。</p> : !manual && draft.status === 'failed' ? <section><p role="alert">生成に失敗しました。本人用の手順は作成されていません。</p><button onClick={() => void action(async () => {
                 const r = await api(`/tasks/${draft.taskId}/generations`, 'POST', { learnerId: draft.learnerId });
                 go(`/staff/tasks/${draft.taskId}/drafts/${r.draftId}`);
-            })}>新しいジョブで再試行</button></section> : draft.status === 'approved' ? <section><h2>承認済みです</h2><button onClick={() => go('/staff/handover')}>承認版を確認・本人へ割当</button></section> : <><p>Fake候補です。動画の動作・原音と候補を照合し、必要な修正と写真切り出しを行ってください。確認欄はすべて未確認から始まります。</p>{error && <p role="alert">{error}</p>}{latest && <section><h2>サーバーの最新値（入力は保持）</h2><p>revision {latest.revision} / {latest.status}</p><p>表示方法：{latest.displayMode} / 音声：{String(latest.audioGuidance)}</p><pre>{JSON.stringify({ editedSteps: latest.editedSteps, reviewChecks: latest.reviewChecks }, null, 2)}</pre></section>}<fieldset disabled={busy}><legend>この作業の提示設定</legend><label>表示方法<select value={displayMode} onChange={e => { setDisplayMode(e.target.value as typeof displayMode); setChecks(c => ({ ...c, presentationConfirmed: false })); }}><option value="photo_only">写真のみ</option><option value="photo_text">写真＋短文</option></select></label><label><input type="checkbox" checked={audioGuidance} onChange={e => { setAudioGuidance(e.target.checked); setChecks(c => ({ ...c, presentationConfirmed: false })); }}/>音声ガイドを希望する</label></fieldset><fieldset disabled={busy}><legend>工程の編集と確認</legend><div className="workspace"><aside>{task?.videoAssetId && <Asset id={task.videoAssetId} video/>}<h2>AIの候補・確認が必要な点</h2>{draft.aiProposal?.reviewFlags.map((f: string) => <p key={f}>{f}</p>)}{draft.aiProposal?.steps.map((s: any) => <details key={s.stepId}><summary>{s.stepId}：{s.startMs}–{s.endMs} ms</summary><p>観察候補：{s.observationCandidate}</p><p>声の候補：{s.speechCandidate || '聞き取り未確認'}</p>{s.reviewFlags.map((f: string) => <p key={f}>{f}</p>)}</details>)}</aside><div>{steps.map((s, i) => <section key={s.stepId}><h2>工程 {i + 1}</h2>{s.imageAssetId && <Asset id={s.imageAssetId}/>}<label>本人に見せる短文（40文字以内）<input maxLength={40} value={s.text} onChange={e => change(i, 'text', e.target.value)}/></label><label>写真の代替テキスト（200文字以内）<input maxLength={200} value={s.imageAltText ?? ''} onChange={e => change(i, 'imageAltText', e.target.value)}/></label><label>本人に見せる注意<input maxLength={200} value={s.visibleCaution} onChange={e => change(i, 'visibleCaution', e.target.value)}/></label><div className="times">{(['sourceStartMs', 'sourceEndMs', 'frameMs'] as const).map((key, j) => <label key={key}>{['開始ms', '終了ms', '写真ms'][j]}<input type="number" min={0} value={s[key]} onChange={e => change(i, key, Number(e.target.value))}/></label>)}</div><button disabled={busy} onClick={() => void action(async () => {
+            })}>新しいジョブで再試行</button></section> : draft.status === 'approved' ? <section><h2>承認済みです</h2><button onClick={() => go('/staff/handover')}>承認版を確認・本人へ割当</button></section> : <><p>{manual ? '承認版をコピーした手作業の下書きです。原動画と照合し、修正後にすべての確認を行ってから、新しい版として承認してください。元の承認版と実行中の手順は変わりません。' : 'Fake候補です。動画の動作・原音と候補を照合し、必要な修正と写真切り出しを行ってください。確認欄はすべて未確認から始まります。'}</p>{error && <p role="alert">{error}</p>}{latest && <section><h2>サーバーの最新値（入力は保持）</h2><p>revision {latest.revision} / {latest.status}</p><p>表示方法：{latest.displayMode} / 音声：{String(latest.audioGuidance)}</p><pre>{JSON.stringify({ editedSteps: latest.editedSteps, reviewChecks: latest.reviewChecks }, null, 2)}</pre></section>}<fieldset disabled={busy}><legend>この作業の提示設定</legend><label>表示方法<select value={displayMode} onChange={e => { setDisplayMode(e.target.value as typeof displayMode); setChecks(c => ({ ...c, presentationConfirmed: false })); }}><option value="photo_only">写真のみ</option><option value="photo_text">写真＋短文</option></select></label><label><input type="checkbox" checked={audioGuidance} onChange={e => { setAudioGuidance(e.target.checked); setChecks(c => ({ ...c, presentationConfirmed: false })); }}/>音声ガイドを希望する</label></fieldset><fieldset disabled={busy}><legend>工程の編集と確認</legend><div className="workspace"><aside>{task?.videoAssetId && <Asset id={task.videoAssetId} video/>}{!manual && <><h2>AIの候補・確認が必要な点</h2>{draft.aiProposal?.reviewFlags.map((f: string) => <p key={f}>{f}</p>)}{draft.aiProposal?.steps.map((s: any) => <details key={s.stepId}><summary>{s.stepId}：{s.startMs}–{s.endMs} ms</summary><p>観察候補：{s.observationCandidate}</p><p>声の候補：{s.speechCandidate || '聞き取り未確認'}</p>{s.reviewFlags.map((f: string) => <p key={f}>{f}</p>)}</details>)}</>}</aside><div>{steps.map((s, i) => <section key={s.stepId}><h2>工程 {i + 1}</h2>{s.imageAssetId && <Asset id={s.imageAssetId}/>}<label>本人に見せる短文（40文字以内）<input maxLength={40} value={s.text} onChange={e => change(i, 'text', e.target.value)}/></label><label>写真の代替テキスト（200文字以内）<input maxLength={200} value={s.imageAltText ?? ''} onChange={e => change(i, 'imageAltText', e.target.value)}/></label><label>本人に見せる注意<input maxLength={200} value={s.visibleCaution} onChange={e => change(i, 'visibleCaution', e.target.value)}/></label><div className="times">{(['sourceStartMs', 'sourceEndMs', 'frameMs'] as const).map((key, j) => <label key={key}>{['開始ms', '終了ms', '写真ms'][j]}<input type="number" min={0} value={s[key]} onChange={e => change(i, key, Number(e.target.value))}/></label>)}</div><button disabled={busy} onClick={() => void action(async () => {
                     setBusy(true);
                     try {
                         const r = await api(`/drafts/${id}/frames`, 'POST', { frameMs: s.frameMs });
@@ -266,15 +281,36 @@ function Handover({ path, action, staff = false }: {
     staff?: boolean;
 }) {
     const [items, setItems] = useState<any[]>([]), [release, setRelease] = useState<any>(), [read, setRead] = useState(''), [filter, setFilter] = useState('');
+    const copyStates = useRef<Record<string, ReleaseCopyState>>({});
+    const [copying, setCopying] = useState(false), [copyError, setCopyError] = useState('');
     const releaseId = path.match(/\/releases\/([^/]+)/)?.[1];
     useEffect(() => {
+        let active = true;
         void action(async () => {
-            setItems((await api('/handover/releases')).releases);
-            if (releaseId)
-                setRelease((await api(`/handover/releases/${releaseId}`)).release);
+            setRelease(undefined);
+            setCopyError('');
+            const releases = (await api('/handover/releases')).releases;
+            if (!active) return;
+            setItems(releases);
+            if (releaseId) {
+                const detail = (await api(`/handover/releases/${releaseId}`)).release;
+                if (active) setRelease(detail);
+            }
         });
+        return () => { active = false; };
     }, [path]);
-    return <><h1>職員が確認した手順・教え方</h1><p>承認版だけを表示します。</p>{releaseId && release ? <><button onClick={() => go(staff ? '/staff/handover' : '/handover')}>一覧へ</button><p>承認者 {release.approvedBy} / {new Date(release.approvedAt).toLocaleString('ja-JP')}</p>{release.learnerSteps.map((s: any, i: number) => {
+    return <><h1>職員が確認した手順・教え方</h1><p>承認版だけを表示します。</p>{releaseId && release?.releaseId === releaseId ? <><button onClick={() => go(staff ? '/staff/handover' : '/handover')}>一覧へ</button><p>承認者 {release.approvedBy} / {new Date(release.approvedAt).toLocaleString('ja-JP')}</p>{staff && <><button disabled={copying || !items.some(r => r.releaseId === releaseId)} onClick={async () => {
+                const state = copyStates.current[releaseId] ??= { sending: false };
+                const clientRequestId = beginReleaseCopy(state);
+                if (!clientRequestId) return;
+                setCopying(true); setCopyError('');
+                try {
+                    const summary = items.find(r => r.releaseId === releaseId);
+                    const result = releaseCopyResponseSchema.parse(await api(`/releases/${releaseId}/drafts`, 'POST', { clientRequestId }));
+                    go(`/staff/tasks/${summary.taskId}/drafts/${result.draftId}`);
+                } catch (e) { setCopyError((e as Error).message); }
+                finally { state.sending = false; setCopying(false); }
+            }}>コピーして直す</button>{copying && <p role="status">承認版をコピーしています。</p>}{copyError && <p role="alert">{copyError}</p>}</>}{release.learnerSteps.map((s: any, i: number) => {
                 const g = release.staffGuide[i];
                 return <section key={s.stepId}><h2>{i + 1}：{s.text}</h2><div className="two"><Asset id={s.imageAssetId}/><div><p>{s.visibleCaution}</p><p>確認した動作：{g.verifiedObservation}</p><p>確認した声：{g.verifiedSpeech || '記録なし'}</p><p>声かけ・待つ位置：{g.coaching}</p><p>完成基準：{g.completionCheck}</p><p>原動画：{g.sourceStartMs}–{g.sourceEndMs} ms</p><Asset id={release.videoAssetId} video startMs={g.sourceStartMs} endMs={g.sourceEndMs}/></div></div></section>;
             })}{!staff && <button onClick={() => void action(async () => {
