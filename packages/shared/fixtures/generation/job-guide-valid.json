@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1",
+  "jobId": "job-demo",
+  "draftId": "draft-demo",
+  "taskId": "task-demo",
+  "kind": "guide",
+  "status": "queued",
+  "attempt": 0,
+  "modelId": "model-demo",
+  "promptVersion": "1",
+  "inputSnapshot": {
+    "taskId": "task-demo",
+    "learnerId": "learner-demo",
+    "videoAssetId": "video-demo",
+    "title": "タオルの包装",
+    "completionCriteria": "帯紙と袋口を見本と比べる",
+    "durationMs": 120000,
+    "preferences": {
+      "sentenceLength": 20,
+      "splitHints": "一つずつ説明する",
+      "audioGuidance": false
+    },
+    "displayMode": "photo_text",
+    "confirmedGuidance": [
+      "目印を具体的に示す"
+    ]
+  }
+}

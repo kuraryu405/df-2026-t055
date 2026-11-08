@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { generationRequestSchema } from './generation.ts';
+export * from './generation.ts';
 export const schemaVersion = '1' as const;
 const time = z.number().int().nonnegative();
 const candidate = z.string().max(200);
@@ -55,7 +57,6 @@ export type LearnerSessionDTO = {
 export const transitions = {
     queued: ['running'], running: ['succeeded', 'failed'], active: ['waiting_help', 'stopped', 'completed'], waiting_help: ['active', 'stopped'], stopped: [], completed: ['stopped']
 } as const;
-export const generationRequestSchema = z.object({ learnerId: z.string().min(1) }).strict();
 export const approvalRequestSchema = z.object({ expectedRevision: z.number().int().nonnegative(), approvalRequestId: z.string().min(1).max(100) }).strict();
 export const draftPatchSchema = z.object({ expectedRevision: z.number().int().nonnegative(), editedSteps: z.array(editedStepSchema).min(1).max(20), reviewChecks: checksSchema }).strict();
 export const sessionStartSchema = z.object({ taskId: z.string().min(1), clientRequestId: z.string().min(1).max(100) }).strict();

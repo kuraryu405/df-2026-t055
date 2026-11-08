@@ -1,0 +1,13 @@
+{
+  "correctionId": "correction-demo",
+  "draftRevision": 2,
+  "title": "タオルの包装",
+  "changes": [
+    {
+      "stepId": "s01",
+      "field": "text",
+      "before": "はしをそろえる",
+      "after": "赤い線にあわせる"
+    }
+  ]
+}

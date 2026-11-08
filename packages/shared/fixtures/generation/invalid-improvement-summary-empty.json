@@ -1,0 +1,12 @@
+{
+  "learnerId": "learner-demo",
+  "sourceReleaseId": "release-demo",
+  "supportInputs": [
+    {
+      "recordId": "record-demo-1",
+      "revision": 1,
+      "summary": "  "
+    }
+  ],
+  "clientRequestId": "request-demo"
+}
