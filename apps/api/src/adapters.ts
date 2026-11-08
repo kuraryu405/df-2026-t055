@@ -61,10 +61,10 @@ export class MemoryRepository implements Repository {
     }
 }
 export interface Storage {
-    put(path: string, bytes: Buffer): Promise<void>;
-    get(path: string): Promise<Buffer>;
-    open(path: string): Promise<ReadableStream<Uint8Array>>;
-    copy(from: string, to: string): Promise<void>;
+    put(path: string, bytes: Buffer): Promise<void | string>;
+    get(path: string, generation?: string | number): Promise<Buffer>;
+    open(path: string, generation?: string | number): Promise<ReadableStream<Uint8Array>>;
+    copy(from: string, to: string, generation?: string | number): Promise<void | string>;
 }
 export class LocalStorage implements Storage {
     constructor(private root = resolve('.local/assets')) {

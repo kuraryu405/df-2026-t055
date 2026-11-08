@@ -51,7 +51,7 @@ export function createWorker(db: Repository, storage: Storage, model: VideoModel
             errorCode = 'GENERATION_FAILED';
             const editedSteps: EditedStep[] = [];
             const assets: Doc[] = [];
-            const video = await storage.get(v.objectPath);
+            const video = await storage.get(v.objectPath, v.generation);
             for (const s of proposal.steps) {
                 if (Date.now() - started > 230000) {
                     errorCode = 'JOB_TIMEOUT';
@@ -65,7 +65,7 @@ export function createWorker(db: Repository, storage: Storage, model: VideoModel
                 const a = doc(d.orgId, {
                     kind: 'image', objectPath: `draft/${d.orgId}/${d.id}/${crypto.randomUUID()}.jpg`, generation: 1, mimeType: 'image/jpeg', sourceVideoId: v.id, frameMs: s.frameMs, draftId: d.id, visibility: 'staff'
                 });
-                await storage.put(a.objectPath, image);
+                a.generation = await storage.put(a.objectPath, image) ?? a.generation;
                 assets.push(a);
                 editedSteps.push({
                     stepId: s.stepId, text: s.instructionDraft, visibleCaution: '', imageAssetId: a.id, sourceStartMs: s.startMs, sourceEndMs: s.endMs, frameMs: s.frameMs, verifiedObservation: s.observationCandidate, verifiedSpeech: s.speechCandidate, coaching: s.coachingDraft, completionCheck: s.completionCheckDraft

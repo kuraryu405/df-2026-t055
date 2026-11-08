@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { releaseCopyRequestSchema, releaseCopyResponseSchema, draftDetailSchema, editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, normalizeRelease, projectReleaseToSessionSteps, learnerSessionSchema, type Member } from '../../../packages/shared/src/index.ts';
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
 import { supportResumeRequestSchema, supportResumeResponseSchema, supportRecordSchema, supportRecordSaveRequestSchema, supportOperationRequestSchema, supportStartResponseSchema, supportAcknowledgeResponseSchema, supportClaimResponseSchema, supportRequestListResponseSchema, supportRequestStatusQuerySchema } from '../../../packages/shared/src/support.ts';
-import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
+import { MemoryRepository, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
+import { configuredStorage } from './cloud-storage.ts';
 import { configuredRepository } from './firestore-repository.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
 import { media } from './media.ts';
@@ -44,7 +45,7 @@ export function createApp(options: {
     const db = options.db ?? configuredRepository();
     if (!options.db && db instanceof MemoryRepository)
         seed(db);
-    const storage = options.storage ?? new LocalStorage();
+    const storage = options.storage ?? configuredStorage();
     const tts = options.tts ?? configuredTts();
     const auth = options.auth ?? new DemoAuth(db);
     const app = http();
@@ -134,7 +135,7 @@ export function createApp(options: {
         const a = doc(t.orgId, {
             kind: 'video', objectPath: `source/${t.orgId}/${t.id}/${id()}.mp4`, generation: 1, mimeType: 'video/mp4', durationMs, visibility: 'staff'
         });
-        await storage.put(a.objectPath, req.file.buffer);
+        a.generation = await storage.put(a.objectPath, req.file.buffer) ?? a.generation;
         await db.transaction(async () => {
             const fresh = await get('tasks', t.id, res);
             if (fresh.status !== 'uploading')
@@ -233,7 +234,7 @@ export function createApp(options: {
                 mimeType: image.mimeType, sourceVideoId: image.sourceVideoId, frameMs: image.frameMs,
                 draftId: d.id, visibility: 'staff'
             });
-            await storage.copy(image.objectPath, asset.objectPath);
+            asset.generation = await storage.copy(image.objectPath, asset.objectPath, image.generation) ?? asset.generation;
             copiedAssets.push(asset);
             const { order, audioAssetId, ...content } = step;
             editedSteps.push(editedStepSchema.parse({ ...content, ...guide, imageAssetId: asset.id, frameMs: asset.frameMs }));
@@ -329,7 +330,7 @@ export function createApp(options: {
         const t = await get('tasks', d.taskId, res), v = await get('assets', t.videoAssetId, res);
         let image;
         try {
-            ({ image } = await media(await storage.get(v.objectPath), frameMs));
+            ({ image } = await media(await storage.get(v.objectPath, v.generation), frameMs));
         }
         catch {
             fail(422, 'INVALID_FRAME');
@@ -337,7 +338,7 @@ export function createApp(options: {
         const a = doc(d.orgId, {
             kind: 'image', objectPath: `draft/${d.orgId}/${d.id}/${id()}.jpg`, generation: 1, mimeType: 'image/jpeg', sourceVideoId: v.id, frameMs, draftId: d.id, visibility: 'staff'
         });
-        await storage.put(a.objectPath, image!);
+        a.generation = await storage.put(a.objectPath, image!) ?? a.generation;
         await db.put('assets', a);
         send(res, { imageAssetId: a.id });
     });
@@ -370,7 +371,7 @@ export function createApp(options: {
             const a = doc(d.orgId, {
                 ...source, id: id(), createdAt: now(), objectPath: `approved/${d.orgId}/${releaseId}/${id()}.jpg`, visibility: 'approved', releaseId
             });
-            await storage.copy(source.objectPath, a.objectPath);
+            a.generation = await storage.copy(source.objectPath, a.objectPath, source.generation) ?? a.generation;
             assets.push(a);
         }
         // TTS and Storage must not run inside a retryable Firestore callback.
@@ -389,7 +390,7 @@ export function createApp(options: {
                         generation: 1, mimeType: audio.mimeType, durationMs: audio.durationMs,
                         visibility: 'approved', releaseId
                     });
-                    await storage.put(a.objectPath, audio.bytes);
+                    a.generation = await storage.put(a.objectPath, audio.bytes) ?? a.generation;
                     audioAssets.push(a);
                 }
             } catch {
@@ -757,7 +758,7 @@ export function createApp(options: {
             if (!allowed)
                 fail(403, 'ASSET_FORBIDDEN');
         }
-        res.type(a.mimeType).send(await storage.open(a.objectPath));
+        res.type(a.mimeType).send(await storage.open(a.objectPath, a.generation));
     });
     api.post('/internal/drain', async (req, res) => {
         if (!options.runJob)

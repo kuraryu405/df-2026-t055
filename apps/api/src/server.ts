@@ -1,13 +1,14 @@
 import http from './http.ts';
 import { resolve } from 'node:path';
 import { createApp } from './app.ts';
-import { MemoryRepository, LocalStorage, seed } from './adapters.ts';
+import { MemoryRepository, seed } from './adapters.ts';
 import { createWorker } from '../../generator/src/worker.ts';
+import { configuredStorage } from './cloud-storage.ts';
 import { configuredRepository } from './firestore-repository.ts';
 import { configuredModel } from '../../generator/src/model.ts';
 if (process.env.NODE_ENV === 'production')
     throw Error('Install production Auth/Repository/Storage/Queue/OIDC adapters before deployment');
-const db = configuredRepository(), storage = new LocalStorage();
+const db = configuredRepository(), storage = configuredStorage();
 if (db instanceof MemoryRepository) seed(db);
 const limit = Number(process.env.GENERATION_GLOBAL_LIMIT ?? 30);
 const runJob = createWorker(db, storage, configuredModel(process.env), limit);
