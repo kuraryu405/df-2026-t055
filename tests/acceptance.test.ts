@@ -124,7 +124,7 @@ test('本人・新人の下書き境界、本人の原動画／下書き画像�
         const json = JSON.stringify(s);
         for (const forbidden of ['staffGuide', 'draftId', 'sourceDraftId', 'objectPath', 'aiProposal', 'coaching'])
             assert.ok(!json.includes(forbidden));
-        assert.deepEqual(Object.keys(s.steps[0]).sort(), ['imageAssetId', 'order', 'stepId', 'text', 'visibleCaution']);
+        assert.deepEqual(Object.keys(s.steps[0]).sort(), ['imageAltText', 'imageAssetId', 'order', 'stepId', 'text', 'visibleCaution']);
         assert.equal((await h.request(`/assets/${s.steps[0].imageAssetId}`, 'GET', undefined, 'learner-a')).status, 200);
     }
     finally {
@@ -508,7 +508,7 @@ test('音声ありの承認は確認済み短文だけを渡し、版専用音�
         assert.ok(a);
         assert.equal(a.visibility, 'approved');
         assert.equal(a.releaseId, r.releaseId);
-        assert.deepEqual(Object.keys(step).sort(), ['audioAssetId', 'imageAssetId', 'order', 'stepId', 'text', 'visibleCaution']);
+        assert.deepEqual(Object.keys(step).sort(), ['audioAssetId', 'imageAltText', 'imageAssetId', 'order', 'stepId', 'text', 'visibleCaution']);
         const response = await h.request(`/assets/${a.id}`, 'GET', undefined, 'learner-b');
         assert.equal(response.status, 200);
         assert.equal(response.headers.get('content-type'), 'audio/wav');

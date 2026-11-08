@@ -2,7 +2,7 @@ import http, { type Request, type Response, type NextFunction } from './http.ts'
 import { uploadVideo } from './upload.ts';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, type Member, type LearnerSessionDTO } from '../../../packages/shared/src/index.ts';
+import { editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, normalizeRelease, projectReleaseToSessionSteps, learnerSessionSchema, type Member } from '../../../packages/shared/src/index.ts';
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
 import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
@@ -23,6 +23,10 @@ function learnerProfileDetail(d: Doc) {
         ...Object.fromEntries(['learnerWishes', 'staffObservations', 'staffSuggestions', 'confirmedGuidance', 'disabilityInfo']
             .filter(key => d[key] !== undefined).map(key => [key, d[key]]))
     });
+}
+function savedRelease(d: Doc) {
+    const { id, orgId, createdAt, approvalRequestId, ...contract } = d;
+    return normalizeRelease({ schemaVersion: '1', appliedSupportRecordRefs: [], ...contract, releaseId: id });
 }
 export function createApp(options: {
     tts?: TtsAdapter;
@@ -374,15 +378,21 @@ export function createApp(options: {
             fail(403, 'LEARNER_FORBIDDEN');
         return s;
     };
-    async function dto(s: Doc): Promise<LearnerSessionDTO> {
+    async function dto(s: Doc) {
         const r = await db.get('releases', s.releaseId);
         if (!r || r.orgId !== s.orgId || r.learnerId !== s.learnerId)
             fail(403, 'RELEASE_FORBIDDEN');
-        return {
-            schemaVersion: '1', sessionId: s.id, releaseId: r.id, steps: r.learnerSteps.map((x: any) => ({
-                stepId: x.stepId, order: x.order, imageAssetId: x.imageAssetId, ...(x.audioAssetId ? { audioAssetId: x.audioAssetId } : {}), text: x.text, visibleCaution: x.visibleCaution
-            })), status: s.status, stepIndex: s.stepIndex, revision: s.revision
-        };
+        const release = savedRelease(r);
+        const steps = projectReleaseToSessionSteps(release).map(step => {
+            if (release.audioGuidance) return step;
+            const { audioAssetId, ...silent } = step;
+            return silent;
+        });
+        return learnerSessionSchema.parse({
+            schemaVersion: '1', sessionId: s.id, releaseId: release.releaseId,
+            displayMode: release.displayMode, audioGuidance: release.audioGuidance, steps,
+            status: s.status, stepIndex: s.stepIndex, revision: s.revision
+        });
     }
     api.get('/me/assignments', async (req, res) => {
         role(res, 'learner');
