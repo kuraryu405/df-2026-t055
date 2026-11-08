@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { releaseCopyRequestSchema, releaseCopyResponseSchema, draftDetailSchema, editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, normalizeRelease, projectReleaseToSessionSteps, learnerSessionSchema, type Member } from '../../../packages/shared/src/index.ts';
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
-import { supportRecordSchema, supportRecordSaveRequestSchema, supportOperationRequestSchema, supportStartResponseSchema, supportAcknowledgeResponseSchema, supportClaimResponseSchema, supportRequestListResponseSchema, supportRequestStatusQuerySchema } from '../../../packages/shared/src/support.ts';
+import { supportResumeRequestSchema, supportResumeResponseSchema, supportRecordSchema, supportRecordSaveRequestSchema, supportOperationRequestSchema, supportStartResponseSchema, supportAcknowledgeResponseSchema, supportClaimResponseSchema, supportRequestListResponseSchema, supportRequestStatusQuerySchema } from '../../../packages/shared/src/support.ts';
 import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
 import { media } from './media.ts';
@@ -504,11 +504,14 @@ export function createApp(options: {
                         fail(409, 'INVALID_STATE');
                     s.status = 'waiting_help';
                     break;
-                case 'resume':
-                    if (s.status !== 'waiting_help' || (await list('supportRequests', res)).some(q => q.sessionId === s.id && q.status === 'open'))
+                case 'resume': {
+                    const q = s.activeSupportRequestId ? await get('supportRequests', s.activeSupportRequestId, res) : undefined;
+                    if (s.status !== 'waiting_help' || !q || q.sessionId !== s.id || q.kind !== 'help' || q.status !== 'acknowledged')
                         fail(409, 'HELP_PENDING');
                     s.status = 'active';
+                    delete s.activeSupportRequestId;
                     break;
+                }
                 default:
                     if (s.status !== 'active')
                         fail(409, 'INVALID_STATE');
@@ -531,10 +534,14 @@ export function createApp(options: {
                 sessionId: s.id, clientEventId: input.clientEventId, type: input.type, stepId: r.learnerSteps[s.stepIndex].stepId, createdBy: member(res).uid, receivedAt: now()
             });
             await db.put('sessionEvents', e);
-            if (['stop', 'help'].includes(input.type))
-                await db.put('supportRequests', doc(s.orgId, {
+            if (['stop', 'help'].includes(input.type)) {
+                const q = doc(s.orgId, {
                     sessionId: s.id, eventId: e.id, learnerId: s.learnerId, stepId: e.stepId, kind: input.type, status: 'open', revision: 1
-                }));
+                });
+                if (input.type === 'help')
+                    s.activeSupportRequestId = q.id;
+                await db.put('supportRequests', q);
+            }
             await db.put('sessions', s);
             return s;
         });
@@ -612,6 +619,51 @@ export function createApp(options: {
                 fail(403, 'NOT_ASSIGNED');
             const response = supportAcknowledgeResponseSchema.parse({ schemaVersion: '1', status: 'acknowledged', acknowledgedAt: now() });
             await db.put('supportRequests', { ...q, status: response.status, acknowledgedAt: response.acknowledgedAt, acknowledgedBy: member(res).uid, revision: q.revision + 1 });
+            return response;
+        });
+        res.json(result);
+    });
+    api.post('/support-requests/:id/resume', async (req, res) => {
+        staff(res);
+        const input = supportResumeRequestSchema.parse(req.body);
+        const result = await db.transaction(async () => {
+            const q = await get('supportRequests', req.params.id, res);
+            if (q.kind !== 'help' || !['in_progress', 'acknowledged'].includes(q.status))
+                fail(409, 'INVALID_STATE');
+            if (q.assignedTo !== member(res).uid)
+                fail(403, 'NOT_ASSIGNED');
+            const s = await get('sessions', q.sessionId, res);
+            // Stop takes priority even over a successful resume retry.
+            if (s.status === 'stopped')
+                fail(409, 'SESSION_STOPPED');
+            const prior = (await list('sessionEvents', res)).find(e =>
+                e.supportRequestId === q.id && e.clientRequestId === input.clientRequestId);
+            if (prior) {
+                if (prior.expectedSessionRevision !== input.expectedSessionRevision)
+                    fail(409, 'REVISION_CONFLICT');
+                return supportResumeResponseSchema.parse(prior.response);
+            }
+            if (s.revision !== input.expectedSessionRevision)
+                fail(409, 'REVISION_CONFLICT');
+            if (s.status !== 'waiting_help' || s.activeSupportRequestId !== q.id)
+                fail(409, 'INVALID_STATE');
+            const r = await get('releases', s.releaseId, res);
+            const timestamp = now();
+            const response = supportResumeResponseSchema.parse({
+                schemaVersion: '1', sessionId: s.id, status: 'active', stepIndex: s.stepIndex, revision: s.revision + 1
+            });
+            const e = doc(s.orgId, {
+                sessionId: s.id, supportRequestId: q.id, ...input, type: 'resume',
+                stepId: r.learnerSteps[s.stepIndex].stepId, createdBy: member(res).uid, receivedAt: timestamp, response
+            });
+            if (q.status === 'in_progress')
+                await db.put('supportRequests', { ...q, status: 'acknowledged', acknowledgedBy: member(res).uid,
+                    acknowledgedAt: timestamp, revision: q.revision + 1 });
+            s.status = response.status;
+            s.revision = response.revision;
+            delete s.activeSupportRequestId;
+            await db.put('sessionEvents', e);
+            await db.put('sessions', s);
             return response;
         });
         res.json(result);

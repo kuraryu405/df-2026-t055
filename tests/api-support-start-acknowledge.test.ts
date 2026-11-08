@@ -234,3 +234,149 @@ test('同じ工程の再呼出しは別記録となり、後入力の対象は�
     assert.deepEqual(h.db.get('sessions', q.sessionId), sessionBefore);
     assert.deepEqual(h.db.get('releases', sessionBefore!.releaseId), releaseBefore);
 });
+
+const resumeBody = { clientRequestId: 'resume-key', expectedSessionRevision: 1 };
+const staffResume = (h: Awaited<ReturnType<typeof harness>>, q: { id: string }, body = resumeBody, token = 'staff', status = 200) =>
+    h.request(`/support-requests/${q.id}/resume`, 'POST', body, token, status);
+const learnerEvent = (h: Awaited<ReturnType<typeof harness>>, sessionId: string, type: string, expectedRevision: number, status = 200, clientEventId: string = crypto.randomUUID()) =>
+    h.request(`/me/sessions/${sessionId}/events`, 'POST', { clientEventId, expectedRevision, type }, 'learner-a', status);
+async function beginSupport(h: Awaited<ReturnType<typeof harness>>) {
+    const q = await h.support();
+    await h.claim(q.id);
+    await h.request(`/support-requests/${q.id}/start`, 'POST', {});
+    return q;
+}
+
+test('本人再開は対象helpの完了を待ち、再呼出しを古い完了で解除しない', async () => {
+    const h = await harness();
+    const q = await h.support();
+    const original = h.db.get('sessions', q.sessionId)!;
+    assert.equal(original.activeSupportRequestId, q.id);
+    for (const operation of ['claim', 'start', 'acknowledge']) {
+        await learnerEvent(h, q.sessionId, 'resume', 1, 409);
+        await h.request(`/support-requests/${q.id}/${operation}`, 'POST', {});
+    }
+    await learnerEvent(h, q.sessionId, 'resume', 1, 200, 'learner-resume');
+    const resumed = h.db.get('sessions', q.sessionId)!;
+    assert.equal(resumed.activeSupportRequestId, undefined);
+    assert.equal(resumed.releaseId, original.releaseId);
+    assert.equal(resumed.stepIndex, original.stepIndex);
+    await learnerEvent(h, q.sessionId, 'resume', 1, 200, 'learner-resume');
+    assert.equal(h.db.get('sessions', q.sessionId)!.revision, 2);
+    await learnerEvent(h, q.sessionId, 'help', 2);
+    const current = h.db.get('sessions', q.sessionId)!;
+    assert.notEqual(current.activeSupportRequestId, q.id);
+    await learnerEvent(h, q.sessionId, 'resume', 3, 409);
+    await staffResume(h, q, { ...resumeBody, expectedSessionRevision: 3 }, 'staff', 409);
+    assert.deepEqual(h.db.get('sessions', q.sessionId), current);
+});
+
+test('職員再開は完了・イベント・更新を原子的に保存し、再送は元の結果を返す', async () => {
+    for (const acknowledgeFirst of [false, true]) {
+        const h = await harness();
+        const q = await beginSupport(h);
+        const original = h.db.get('sessions', q.sessionId)!;
+        const release = h.db.get('releases', original.releaseId);
+        if (acknowledgeFirst)
+            await h.request(`/support-requests/${q.id}/acknowledge`, 'POST', {});
+        const result = await staffResume(h, q);
+        assert.deepEqual(result, { schemaVersion: '1', sessionId: q.sessionId, status: 'active', stepIndex: original.stepIndex, revision: 2 });
+        const completed = h.db.get('supportRequests', q.id)!;
+        assert.equal(completed.status, 'acknowledged');
+        assert.equal(completed.revision, 4);
+        assert.equal(completed.acknowledgedBy, 'staff');
+        const stored = h.db.get('sessions', q.sessionId)!;
+        assert.equal(stored.activeSupportRequestId, undefined);
+        assert.equal(stored.releaseId, original.releaseId);
+        assert.equal(stored.stepIndex, original.stepIndex);
+        assert.deepEqual(h.db.get('releases', original.releaseId), release);
+        assert.equal(h.db.all('supportRecords').length, 0);
+        const events = h.db.all('sessionEvents');
+        const event = events.find(e => e.supportRequestId === q.id)!;
+        assert.equal(event.type, 'resume');
+        assert.equal(event.createdBy, 'staff');
+        assert.equal(event.stepId, 's1');
+        assert.deepEqual(await staffResume(h, q), result);
+        await learnerEvent(h, q.sessionId, 'help', 2);
+        assert.deepEqual(await staffResume(h, q), result);
+        assert.equal(h.db.get('sessions', q.sessionId)!.status, 'waiting_help');
+        assert.equal(h.db.all('sessionEvents').length, events.length + 1);
+        assert.deepEqual(h.db.get('supportRequests', q.id), completed);
+        await staffResume(h, q, { ...resumeBody, expectedSessionRevision: 3 }, 'staff', 409);
+    }
+});
+
+test('職員再開は認証・担当・所属・入力・revision・stop・終端を検査し失敗時は保存しない', async () => {
+    const h = await harness();
+    const q = await h.support();
+    await staffResume(h, q, resumeBody, 'staff', 409);
+    await h.claim(q.id);
+    await staffResume(h, q, resumeBody, 'staff', 409);
+    await h.request(`/support-requests/${q.id}/start`, 'POST', {});
+    const before = ['sessions', 'supportRequests', 'sessionEvents'].map(c => h.db.all(c));
+    for (const token of ['staff-2', 'other-staff', 'learner-a', 'learner-b', 'newcomer', 'unknown'])
+        await staffResume(h, q, resumeBody, token, token === 'unknown' ? 401 : 403);
+    await staffResume(h, { id: 'missing' }, resumeBody, 'staff', 404);
+    for (const body of [undefined, null, [], {}, { ...resumeBody, clientRequestId: '' }, { ...resumeBody, expectedSessionRevision: -1 },
+        { ...resumeBody, expectedSessionRevision: 0.5 }, { ...resumeBody, assignedTo: 'staff' }])
+        await h.request(`/support-requests/${q.id}/resume`, 'POST', body, 'staff', 422);
+    await staffResume(h, q, { ...resumeBody, expectedSessionRevision: 0 }, 'staff', 409);
+    assert.deepEqual(['sessions', 'supportRequests', 'sessionEvents'].map(c => h.db.all(c)), before);
+    const stop = await h.support('stop');
+    await staffResume(h, stop, resumeBody, 'staff', 409);
+    for (const status of ['completed', 'stopped']) {
+        h.db.put('sessions', { ...h.db.get('sessions', q.sessionId)!, status });
+        await staffResume(h, q, resumeBody, 'staff', 409);
+        assert.equal(h.db.get('supportRequests', q.id)!.status, 'in_progress');
+    }
+});
+
+test('停止と職員再開はどちらの順序でも停止が残り、保存済み再開の再送も409', async () => {
+    for (const stopFirst of [true, false]) {
+        const h = await harness();
+        const q = await beginSupport(h);
+        const stop = () => learnerEvent(h, q.sessionId, 'stop', 0);
+        const resume = () => staffResume(h, q, resumeBody, 'staff', stopFirst ? 409 : 200);
+        await Promise.all(stopFirst ? [stop(), resume()] : [resume(), stop()]);
+        assert.equal(h.db.get('sessions', q.sessionId)!.status, 'stopped');
+        await staffResume(h, q, resumeBody, 'staff', 409);
+        await learnerEvent(h, q.sessionId, 'resume', 1, 409);
+        assert.equal(h.db.all('sessionEvents').filter(e => e.type === 'resume').length, stopFirst ? 0 : 1);
+        assert.equal(h.db.get('supportRequests', q.id)!.status, stopFirst ? 'in_progress' : 'acknowledged');
+    }
+});
+
+test('再開保存が途中で失敗すると対応完了・イベント・セッションを全てロールバックする', async () => {
+    const h = await harness();
+    const q = await beginSupport(h);
+    const collections = ['supportRequests', 'sessionEvents', 'sessions'];
+    const before = collections.map(c => h.db.all(c));
+    const put = h.db.put.bind(h.db);
+    h.db.put = (collection, value) => {
+        if (collection === 'sessions') throw new Error('synthetic write failure');
+        put(collection, value);
+    };
+    await staffResume(h, q, resumeBody, 'staff', 500);
+    assert.deepEqual(collections.map(c => h.db.all(c)), before);
+    h.db.put = put;
+    await staffResume(h, q);
+});
+
+test('並行した職員再送は一度だけ再開し、先頭以外の工程と固定版も保持する', async () => {
+    const h = await harness();
+    const q = await beginSupport(h);
+    const s = h.db.get('sessions', q.sessionId)!;
+    const r = h.db.get('releases', s.releaseId)!;
+    h.db.put('releases', { ...r, learnerSteps: [...r.learnerSteps, { ...r.learnerSteps[0], stepId: 's2' }] });
+    h.db.put('sessions', { ...s, stepIndex: 1 });
+    const fixed = h.db.get('releases', s.releaseId);
+    const [first, second] = await Promise.all([staffResume(h, q), staffResume(h, q)]);
+    assert.deepEqual(first, second);
+    assert.equal(first.stepIndex, 1);
+    assert.equal(h.db.get('sessions', s.id)!.releaseId, s.releaseId);
+    assert.deepEqual(h.db.get('releases', s.releaseId), fixed);
+    const events = h.db.all('sessionEvents').filter(e => e.type === 'resume');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].stepId, 's2');
+    await staffResume(h, q, { ...resumeBody, clientRequestId: 'different' }, 'staff', 409);
+});
