@@ -2,7 +2,7 @@ import http, { type Request, type Response, type NextFunction } from './http.ts'
 import { uploadVideo } from './upload.ts';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, normalizeRelease, projectReleaseToSessionSteps, learnerSessionSchema, type Member } from '../../../packages/shared/src/index.ts';
+import { releaseCopyRequestSchema, releaseCopyResponseSchema, draftDetailSchema, editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, normalizeRelease, projectReleaseToSessionSteps, learnerSessionSchema, type Member } from '../../../packages/shared/src/index.ts';
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
 import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
@@ -201,6 +201,45 @@ export function createApp(options: {
         });
         send(res, result, 202);
     });
+    api.post('/releases/:id/drafts', async (req, res) => {
+        staff(res);
+        const { clientRequestId } = releaseCopyRequestSchema.parse(req.body);
+        const source = await get('releases', req.params.id, res);
+        const result = await db.transaction(async () => {
+            const existing = (await list('drafts', res)).find(d => d.sourceReleaseId === source.id && d.clientRequestId === clientRequestId);
+            if (existing)
+                return existing;
+            const release = savedRelease(source);
+            const d = doc(source.orgId, {
+                sourceReleaseId: source.id, clientRequestId, taskId: release.taskId, learnerId: release.learnerId,
+                status: 'editing', revision: 0, displayMode: release.displayMode, audioGuidance: release.audioGuidance,
+                appliedSupportRecordRefs: release.appliedSupportRecordRefs, updatedBy: member(res).uid
+            });
+            const editedSteps = [];
+            for (const step of release.learnerSteps) {
+                const guide = release.staffGuide.find(g => g.stepId === step.stepId);
+                if (!guide)
+                    fail(422, 'INVALID_STEPS');
+                const image = await get('assets', step.imageAssetId, res);
+                if (image.kind !== 'image' || image.visibility !== 'approved' || image.releaseId !== source.id)
+                    fail(422, 'INVALID_IMAGE');
+                const asset = doc(d.orgId, {
+                    kind: 'image', objectPath: `draft/${d.orgId}/${d.id}/${id()}.jpg`, generation: 1,
+                    mimeType: image.mimeType, sourceVideoId: image.sourceVideoId, frameMs: image.frameMs,
+                    draftId: d.id, visibility: 'staff'
+                });
+                await storage.copy(image.objectPath, asset.objectPath);
+                await db.put('assets', asset);
+                const { order, audioAssetId, ...content } = step;
+                editedSteps.push(editedStepSchema.parse({ ...content, ...guide, imageAssetId: asset.id, frameMs: asset.frameMs }));
+            }
+            d.editedSteps = editedSteps;
+            d.reviewChecks = { presentationConfirmed: false, flagResolution: '', steps: Object.fromEntries(editedSteps.map(s => [s.stepId, { videoVerified: false, photoTextVerified: false }])) };
+            await db.put('drafts', d);
+            return d;
+        });
+        res.status(201).json(releaseCopyResponseSchema.parse({ schemaVersion: '1', draftId: result.id, status: 'editing', revision: result.revision }));
+    });
     api.get('/jobs/:id', async (req, res) => {
         staff(res);
         const j = await get('generationJobs', req.params.id, res);
@@ -208,7 +247,12 @@ export function createApp(options: {
     });
     api.get('/drafts/:id', async (req, res) => {
         staff(res);
-        send(res, { draft: await get('drafts', req.params.id, res) });
+        const d = await get('drafts', req.params.id, res);
+        if (d.sourceReleaseId) {
+            const { id, orgId, createdAt, clientRequestId, modificationCount, correctionReason, ...detail } = d;
+            return send(res, { draft: draftDetailSchema.parse({ ...detail, schemaVersion: '1', draftId: id }) });
+        }
+        send(res, { draft: d });
     });
     async function validSteps(d: Doc, steps: z.infer<typeof editedStepSchema>[], res: Response, requireImages = false) {
         const t = await get('tasks', d.taskId, res), v = await get('assets', t.videoAssetId, res);
@@ -256,7 +300,7 @@ export function createApp(options: {
                 return checks ? [[step.stepId, checks]] : [];
             }));
             const modificationCount = input.editedSteps.filter(s => {
-                const ai = d.aiProposal.steps.find((p: any) => p.stepId === s.stepId);
+                const ai = d.aiProposal?.steps.find((p: any) => p.stepId === s.stepId);
                 return !ai || s.text !== ai.instructionDraft || s.sourceStartMs !== ai.startMs || s.sourceEndMs !== ai.endMs || s.frameMs !== ai.frameMs || s.coaching !== ai.coachingDraft;
             }).length;
             await db.put('drafts', {
@@ -300,7 +344,14 @@ export function createApp(options: {
         await validSteps(d, steps, res, true);
         if (!d.reviewChecks.presentationConfirmed || steps.some(s => !d.reviewChecks.steps[s.stepId]?.videoVerified || !d.reviewChecks.steps[s.stepId]?.photoTextVerified))
             fail(422, 'REVIEW_REQUIRED');
-        if ((d.aiProposal.reviewFlags.length || d.aiProposal.steps.some((s: any) => s.reviewFlags.length)) && !d.reviewChecks.flagResolution.trim())
+        if (d.sourceReleaseId) {
+            const source = await get('releases', d.sourceReleaseId, res);
+            if (source.taskId !== d.taskId || source.learnerId !== d.learnerId)
+                fail(422, 'INVALID_SOURCE_RELEASE');
+            if ((d.appliedSupportRecordRefs ?? []).some((ref: any) => !(source.appliedSupportRecordRefs ?? []).some((inherited: any) => inherited.recordId === ref.recordId && inherited.revision === ref.revision)))
+                fail(422, 'INVALID_SUPPORT_RECORD_REFS');
+        }
+        else if ((d.aiProposal.reviewFlags.length || d.aiProposal.steps.some((s: any) => s.reviewFlags.length)) && !d.reviewChecks.flagResolution.trim())
             fail(422, 'FLAGS_UNRESOLVED');
         const releaseId = id();
         const assets: Doc[] = [];
@@ -348,7 +399,7 @@ export function createApp(options: {
                 stepId, sourceStartMs, sourceEndMs, verifiedObservation, verifiedSpeech, coaching, completionCheck
             }));
             const snapshot = releaseSchema.parse({
-                schemaVersion: '1', releaseId, taskId: d.taskId, learnerId: d.learnerId, sourceDraftId: d.id, sourceRevision: d.revision, version: (await list('releases', res)).filter(r => r.taskId === d.taskId && r.learnerId === d.learnerId).length + 1, displayMode, audioGuidance, appliedSupportRecordRefs: fresh.appliedSupportRecordRefs ?? [], learnerSteps, staffGuide, approvedBy: member(res).uid, approvedAt: now(), contentHash: createHash('sha256').update(JSON.stringify({ displayMode, audioGuidance, learnerSteps, staffGuide })).digest('hex')
+                schemaVersion: '1', releaseId, ...(d.sourceReleaseId ? { sourceReleaseId: d.sourceReleaseId } : {}), taskId: d.taskId, learnerId: d.learnerId, sourceDraftId: d.id, sourceRevision: d.revision, version: (await list('releases', res)).filter(r => r.taskId === d.taskId && r.learnerId === d.learnerId).length + 1, displayMode, audioGuidance, appliedSupportRecordRefs: fresh.appliedSupportRecordRefs ?? [], learnerSteps, staffGuide, approvedBy: member(res).uid, approvedAt: now(), contentHash: createHash('sha256').update(JSON.stringify({ displayMode, audioGuidance, learnerSteps, staffGuide })).digest('hex')
             });
             const r = doc(d.orgId, { ...snapshot, id: releaseId, approvalRequestId });
             for (const a of [...assets, ...audioAssets])
