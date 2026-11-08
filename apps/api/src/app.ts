@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { releaseCopyRequestSchema, releaseCopyResponseSchema, draftDetailSchema, editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, normalizeRelease, projectReleaseToSessionSteps, learnerSessionSchema, type Member } from '../../../packages/shared/src/index.ts';
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
-import { supportOperationRequestSchema, supportClaimResponseSchema, supportRequestListResponseSchema, supportRequestStatusQuerySchema } from '../../../packages/shared/src/support.ts';
+import { supportOperationRequestSchema, supportStartResponseSchema, supportAcknowledgeResponseSchema, supportClaimResponseSchema, supportRequestListResponseSchema, supportRequestStatusQuerySchema } from '../../../packages/shared/src/support.ts';
 import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
 import { media } from './media.ts';
@@ -576,13 +576,45 @@ export function createApp(options: {
         });
         res.json(result);
     });
+    api.post('/support-requests/:id/start', async (req, res) => {
+        staff(res);
+        supportOperationRequestSchema.parse(req.body);
+        const result = await db.transaction(async () => {
+            const q = await get('supportRequests', req.params.id, res);
+            if (q.kind !== 'help')
+                fail(409, 'INVALID_STATE');
+            if (q.assignedTo && q.assignedTo !== member(res).uid)
+                fail(403, 'NOT_ASSIGNED');
+            if (q.status === 'in_progress' && q.startedBy === member(res).uid)
+                return supportStartResponseSchema.parse({ schemaVersion: '1', status: q.status, startedAt: q.startedAt });
+            if (q.status !== 'assigned')
+                fail(409, 'INVALID_STATE');
+            if (q.assignedTo !== member(res).uid)
+                fail(403, 'NOT_ASSIGNED');
+            const response = supportStartResponseSchema.parse({ schemaVersion: '1', status: 'in_progress', startedAt: now() });
+            await db.put('supportRequests', { ...q, status: response.status, startedAt: response.startedAt, startedBy: member(res).uid, revision: q.revision + 1 });
+            return response;
+        });
+        res.json(result);
+    });
     api.post('/support-requests/:id/acknowledge', async (req, res) => {
         staff(res);
-        const q = await get('supportRequests', req.params.id, res);
-        await db.put('supportRequests', {
-            ...q, status: 'acknowledged', acknowledgedBy: member(res).uid, acknowledgedAt: now()
+        supportOperationRequestSchema.parse(req.body);
+        const result = await db.transaction(async () => {
+            const q = await get('supportRequests', req.params.id, res);
+            if (q.kind === 'help' && q.assignedTo && q.assignedTo !== member(res).uid)
+                fail(403, 'NOT_ASSIGNED');
+            if (q.status === 'acknowledged' && q.acknowledgedBy === member(res).uid)
+                return supportAcknowledgeResponseSchema.parse({ schemaVersion: '1', status: q.status, acknowledgedAt: q.acknowledgedAt });
+            if (!(q.kind === 'help' && q.status === 'in_progress') && !(q.kind === 'stop' && q.status === 'open'))
+                fail(409, 'INVALID_STATE');
+            if (q.kind === 'help' && q.assignedTo !== member(res).uid)
+                fail(403, 'NOT_ASSIGNED');
+            const response = supportAcknowledgeResponseSchema.parse({ schemaVersion: '1', status: 'acknowledged', acknowledgedAt: now() });
+            await db.put('supportRequests', { ...q, status: response.status, acknowledgedAt: response.acknowledgedAt, acknowledgedBy: member(res).uid, revision: q.revision + 1 });
+            return response;
         });
-        send(res, { status: 'acknowledged' });
+        res.json(result);
     });
     api.get('/handover/releases', async (req, res) => {
         role(res, 'staff', 'newcomer');
