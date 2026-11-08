@@ -227,21 +227,40 @@ export function createApp(options: {
     api.patch('/drafts/:id', async (req, res) => {
         staff(res);
         const { displayMode, audioGuidance, appliedSupportRecordRefs, correctionReason, ...input } = draftPatchSchema.parse(req.body);
-        const revision = await db.transaction(async () => {
+        const result = await db.transaction(async () => {
             const d = await get('drafts', req.params.id, res);
             if (d.status !== 'editing' || d.revision !== input.expectedRevision)
                 fail(409, 'REVISION_CONFLICT');
             await validSteps(d, input.editedSteps, res);
+            const previousSteps = new Map<string, { step: z.infer<typeof editedStepSchema>; index: number }>(d.editedSteps.map((step: z.infer<typeof editedStepSchema>, index: number) => [step.stepId, { step, index }]));
+            const reviewChecks: typeof input.reviewChecks = { ...input.reviewChecks, steps: {} };
+            if ((displayMode ?? d.displayMode ?? 'photo_text') !== (d.displayMode ?? 'photo_text') ||
+                (audioGuidance ?? d.audioGuidance ?? false) !== (d.audioGuidance ?? false) ||
+                d.editedSteps.length !== input.editedSteps.length)
+                reviewChecks.presentationConfirmed = false;
+            reviewChecks.steps = Object.fromEntries(input.editedSteps.flatMap((step, index) => {
+                const previous = previousSteps.get(step.stepId);
+                const videoChanged = !previous || previous.index !== index ||
+                    previous.step.sourceStartMs !== step.sourceStartMs || previous.step.sourceEndMs !== step.sourceEndMs || previous.step.frameMs !== step.frameMs;
+                const explanationChanged = !previous || (['imageAssetId', 'text', 'visibleCaution', 'imageAltText', 'coaching', 'verifiedObservation', 'verifiedSpeech', 'completionCheck'] as const)
+                    .some(field => previous.step[field] !== step[field]);
+                if (videoChanged || explanationChanged) {
+                    reviewChecks.presentationConfirmed = false;
+                    return [[step.stepId, { videoVerified: videoChanged ? false : (input.reviewChecks.steps[step.stepId]?.videoVerified ?? false), photoTextVerified: false }]];
+                }
+                const checks = input.reviewChecks.steps[step.stepId];
+                return checks ? [[step.stepId, checks]] : [];
+            }));
             const modificationCount = input.editedSteps.filter(s => {
                 const ai = d.aiProposal.steps.find((p: any) => p.stepId === s.stepId);
                 return !ai || s.text !== ai.instructionDraft || s.sourceStartMs !== ai.startMs || s.sourceEndMs !== ai.endMs || s.frameMs !== ai.frameMs || s.coaching !== ai.coachingDraft;
             }).length;
             await db.put('drafts', {
-                ...d, ...(displayMode !== undefined ? { displayMode } : {}), ...(audioGuidance !== undefined ? { audioGuidance } : {}), ...(appliedSupportRecordRefs !== undefined ? { appliedSupportRecordRefs } : {}), ...(correctionReason !== undefined ? { correctionReason } : {}), editedSteps: input.editedSteps, reviewChecks: input.reviewChecks, modificationCount, revision: d.revision + 1, updatedBy: member(res).uid
+                ...d, ...(displayMode !== undefined ? { displayMode } : {}), ...(audioGuidance !== undefined ? { audioGuidance } : {}), ...(appliedSupportRecordRefs !== undefined ? { appliedSupportRecordRefs } : {}), ...(correctionReason !== undefined ? { correctionReason } : {}), editedSteps: input.editedSteps, reviewChecks, modificationCount, revision: d.revision + 1, updatedBy: member(res).uid
             });
-            return d.revision + 1;
+            return { revision: d.revision + 1, reviewChecks };
         });
-        send(res, { revision });
+        send(res, result);
     });
     api.post('/drafts/:id/frames', async (req, res) => {
         staff(res);

@@ -123,7 +123,7 @@ test('PATCHは提示設定・採用記録・修正理由・代替テキストを
     const settings = { displayMode: 'photo_only', audioGuidance: true, appliedSupportRecordRefs: [{ recordId: 'fictional-record', revision: 2 }], correctionReason: '写真を中心に確認する' };
     const payload = { expectedRevision: draft.revision, editedSteps: draft.editedSteps, reviewChecks: draft.reviewChecks };
     const response = await h.ok(`/drafts/${draft.id}`, 'PATCH', { ...payload, ...settings });
-    assert.deepEqual(response, { schemaVersion: '1', revision: 2 });
+    assert.deepEqual(response, { schemaVersion: '1', revision: 2, reviewChecks: draft.reviewChecks });
     const saved = (await h.ok(`/drafts/${draft.id}`)).draft;
     for (const [key, value] of Object.entries(settings)) assert.deepEqual(saved[key], value);
     assert.deepEqual(saved.editedSteps, draft.editedSteps);

@@ -85,7 +85,8 @@ async function harness(limit = 30, model: VideoModel = new FakeModel(), asyncAda
     }
     async function approve(draft: any, key = 'approval-one') {
         const reviewChecks = { presentationConfirmed: true, flagResolution: '全候補を動画と照合して修正した', steps: Object.fromEntries(draft.editedSteps.map((s: any) => [s.stepId, { videoVerified: true, photoTextVerified: true }])) };
-        const { revision } = await ok(`/drafts/${draft.id}`, 'PATCH', { expectedRevision: draft.revision, editedSteps: draft.editedSteps, reviewChecks });
+        const saved = await ok(`/drafts/${draft.id}`, 'PATCH', { expectedRevision: draft.revision, editedSteps: draft.editedSteps, reviewChecks });
+        const { revision } = await ok(`/drafts/${draft.id}`, 'PATCH', { expectedRevision: saved.revision, editedSteps: draft.editedSteps, reviewChecks });
         const payload = { expectedRevision: revision, approvalRequestId: key };
         const release = await ok(`/drafts/${draft.id}/approve`, 'POST', payload);
         return { ...release, payload, revision };
