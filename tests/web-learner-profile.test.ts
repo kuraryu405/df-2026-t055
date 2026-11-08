@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import ts from 'typescript';
 import React from 'react';
 import { buildLearnerProfileUpdate, learnerProfileToForm, buildLearnerProfile, emptyLearnerForm } from '../apps/web/src/learner-form.ts';
+import { learnerProfileDetailSchema } from '../packages/shared/src/learner-profile.ts';
 import { createApp } from '../apps/api/src/app.ts';
 import { MemoryRepository, seed } from '../apps/api/src/adapters.ts';
 
@@ -59,12 +60,12 @@ function harness() {
 
 test('form payload omits unknown values, preserves false and separates wishes/observations/suggestions', () => {
     assert.deepEqual(buildLearnerProfile({ ...emptyLearnerForm, displayName: '架空C' }), { displayName: '架空C' });
-    const body = buildLearnerProfile({ ...emptyLearnerForm, displayName: '架空C', learnerWishes: '写真がよい', staffObservations: '写真を見た', staffSuggestions: '写真で試す', audioGuidance: 'false', displayMode: 'photo_only', sentenceLength: '1' });
+    const body = buildLearnerProfile({ ...emptyLearnerForm, displayName: '架空C', learnerWishes: ['写真がよい'], staffObservations: ['写真を見た'], staffSuggestions: ['写真で試す'], audioGuidance: 'false', displayMode: 'photo_only', sentenceLength: '1' });
     assert.deepEqual(body, { displayName: '架空C', learnerWishes: ['写真がよい'], staffObservations: ['写真を見た'], staffSuggestions: ['写真で試す'], preferences: { audioGuidance: false, displayMode: 'photo_only', sentenceLength: 1 } });
     assert.equal(JSON.stringify(body).includes('null'), false);
 });
 test('payload rejects blank names, invalid ranges, oversized notes and incomplete disability information', () => {
-    for (const patch of [{ displayName: '  ' }, { sentenceLength: '0' }, { sentenceLength: '41' }, { sentenceLength: '1.5' }, { splitHints: 'x'.repeat(201) }, { staffSuggestions: 'x'.repeat(501) }, { disabilityDetail: '架空情報' }])
+    for (const patch of [{ displayName: '  ' }, { sentenceLength: '0' }, { sentenceLength: '41' }, { sentenceLength: '1.5' }, { splitHints: 'x'.repeat(201) }, { staffSuggestions: ['x'.repeat(501)] }, { disabilityDetail: '架空情報' }])
         assert.throws(() => buildLearnerProfile({ ...emptyLearnerForm, displayName: '架空C', ...patch }));
     const body = buildLearnerProfile({ ...emptyLearnerForm, displayName: '架空C', disabilityDetail: '架空情報', disabilitySource: '本人の希望', disabilityConfirmedAt: '2026-11-08T10:00' });
     assert.ok(body.disabilityInfo?.confirmedAt.endsWith('Z'));
@@ -118,7 +119,7 @@ async function open(h: ReturnType<typeof harness>, path: string) {
     h.go(path); h.render(); await hooks.flush(); return h.render();
 }
 test('update builder separates retain, replace, delete and clears editable notes/preferences', () => {
-    const form = { ...emptyLearnerForm, displayName: '架空', confirmedGuidance: '確認1\n確認2', disabilityDetail: '情報', disabilitySource: '本人', disabilityConfirmedAt: '2026-11-08T10:00' };
+    const form = { ...emptyLearnerForm, displayName: '架空', confirmedGuidance: ['確認1', '確認2'], disabilityDetail: '情報', disabilitySource: '本人', disabilityConfirmedAt: '2026-11-08T10:00' };
     const keep = buildLearnerProfileUpdate(form, 4);
     assert.equal(Object.hasOwn(keep, 'disabilityInfo'), false);
     assert.deepEqual(keep.confirmedGuidance, ['確認1', '確認2']);
@@ -127,6 +128,15 @@ test('update builder separates retain, replace, delete and clears editable notes
     assert.equal(buildLearnerProfileUpdate({...form, disabilityAction: 'delete'}, 4).disabilityInfo, null);
     assert.equal(buildLearnerProfileUpdate({...form, disabilityAction: 'replace'}, 4).disabilityInfo?.detail, '情報');
     assert.throws(() => buildLearnerProfileUpdate({...emptyLearnerForm, displayName: '架空', disabilityAction: 'replace'}, 1));
+});
+test('改行を含む確認済み配慮は未編集の往復で変わらない', () => {
+    const saved = learnerProfileDetailSchema.parse({ schemaVersion: '1', learnerId: 'a', orgId: 'demo', displayName: 'Aさん',
+        confirmedGuidance: ['一つ目\n二つ目'], preferences: {}, enteredBy: 'staff', updatedBy: 'staff', revision: 1, createdAt: '2026-11-08T00:00:00Z' });
+    const form = learnerProfileToForm(saved);
+    assert.deepEqual(buildLearnerProfileUpdate(form, 1).confirmedGuidance, ['一つ目\n二つ目']);
+    assert.equal(form.confirmedGuidance.join('\n'), '一つ目\n二つ目');
+    const edited = { ...form, confirmedGuidance: ['一つ目', '二つ目', '三つ目'] };
+    assert.deepEqual(buildLearnerProfileUpdate(edited, 1).confirmedGuidance, ['一つ目', '二つ目', '三つ目']);
 });
 test('edit loads saved values and metadata; PATCH retain/replace/delete return to refreshed detail without altering fixed records', async () => {
     const h = harness();

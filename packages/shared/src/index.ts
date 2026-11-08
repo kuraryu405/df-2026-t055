@@ -167,10 +167,16 @@ export type LearnerAssignmentDTO = z.infer<typeof learnerAssignmentSchema>;
 export type LearnerAssignmentsResponse = z.infer<typeof learnerAssignmentsResponseSchema>;
 export const photoTextSessionStepSchema = releaseLearnerStepSchema;
 export const photoOnlySessionStepSchema = releaseLearnerStepSchema.omit({ text: true, visibleCaution: true });
+// 支援待ちの間だけ付く支援概要（仕様: GET /me/sessions/{id} は support:{requestId,status,revision} を返す）
+export const supportSummarySchema = z.object({
+    requestId: identifier, status: z.enum(['open', 'assigned', 'in_progress', 'acknowledged']), revision: revisionSchema
+}).strict();
+export type SupportSummary = z.infer<typeof supportSummarySchema>;
 const sessionBase = {
     schemaVersion: versionSchema, sessionId: identifier, releaseId: identifier,
     status: z.enum(['active', 'waiting_help', 'stopped', 'completed']),
-    stepIndex: revisionSchema, revision: revisionSchema, audioGuidance: z.boolean()
+    stepIndex: revisionSchema, revision: revisionSchema, audioGuidance: z.boolean(),
+    support: supportSummarySchema.optional()
 };
 export const learnerSessionSchema = z.discriminatedUnion('displayMode', [
     z.object({ ...sessionBase, displayMode: z.literal('photo_text'), steps: z.array(photoTextSessionStepSchema).min(1).max(20) }).strict(),

@@ -59,7 +59,7 @@ function harness() {
         return {releaseId:'release',version:1};
     }});
     const render=()=>{hooks.begin();return Draft({id:'draft',action:async(fn:any)=>fn()});};
-    return {render,calls,get server(){return server},setFail:(v:number)=>fail=v,setReleaseChecks:(v:boolean)=>releaseChecks=v,bump:()=>{server={...server,revision:9}}};
+    return {render,calls,get server(){return server},setFail:(v:number)=>fail=v,setReleaseChecks:(v:boolean)=>releaseChecks=v,bump:()=>{server={...server,revision:9}},approve:()=>{server={...server,status:'approved',revision:9}}};
 }
 function input(tree:any,label:string) {return nodes(nodes(tree).find(n=>n.type==='label'&&text(n).startsWith(label))).find(n=>['input','textarea','select'].includes(n.type));}
 function change(tree:any,label:string,value:any) { input(tree,label).props.onChange({target:{value,checked:value}}); }
@@ -82,7 +82,7 @@ test('labelled edits PATCH presentation and alt, server checks replace local che
     h.setReleaseChecks(true);button(tree,'編集と確認を保存').props.onClick();await settle();tree=h.render();
     const patch=h.calls.find(c=>c.method==='PATCH').body;
     assert.equal(patch.displayMode,'photo_text');assert.equal(patch.audioGuidance,false);assert.equal(patch.editedSteps[0].imageAltText,'新しい手元');
-    assert.match(text(tree),/revision 2/);assert.equal(input(tree,'写真・説明確認済み').props.checked,false);
+    assert.match(text(tree),/保存版：2/);assert.equal(input(tree,'写真・説明確認済み').props.checked,false);
     change(tree,'写真・説明確認済み',true);tree=h.render();change(tree,'本人への提示内容確認済み',true);tree=h.render();
     h.setReleaseChecks(true);button(tree,'この内容を承認').props.onClick();await settle();tree=h.render();
     assert.equal(h.calls.some(c=>c.url.endsWith('/approve')),false);assert.ok(nodes(tree).some(n=>n.props.role==='alert'));
@@ -100,6 +100,16 @@ test('409 and failed send preserve all input, fetch latest separately, retry lat
     assert.match(text(tree),/サーバーの最新値/);assert.equal(input(tree,'本人に見せる短文').props.value,'変更した文');assert.equal(input(tree,'写真の代替').props.value,'変更した代替');assert.equal(input(tree,'表示方法').props.value,'photo_text');assert.equal(input(tree,'音声').props.checked,false);assert.equal(input(tree,'確認が必要な点への対応記録').props.value,'入力の記録');assert.equal(input(tree,'写真・説明確認済み').props.checked,true);
     h.setFail(500);button(tree,'編集と確認を保存').props.onClick();await settle();tree=h.render();assert.equal(input(tree,'本人に見せる短文').props.value,'変更した文');
     h.setFail(0);button(tree,'編集と確認を保存').props.onClick();await settle();assert.equal(h.calls.filter(c=>c.method==='PATCH').at(-1).body.expectedRevision,9);
+});
+test('他職員が承認済みにした後の最新値取得は承認画面へ移る', async () => {
+    const h = harness(); let tree = await open(h);
+    change(tree, '本人に見せる短文', '変更した文'); tree = h.render();
+    h.setFail(409); button(tree, '編集と確認を保存').props.onClick(); await settle(); tree = h.render();
+    assert.equal(button(tree, '編集と確認を保存').props.disabled, true);
+    h.approve(); button(tree, '最新値を取得').props.onClick(); await settle(); tree = h.render();
+    assert.match(text(tree), /承認済みです/);
+    assert.ok(button(tree, '承認版を確認・本人へ割当'));
+    assert.equal(button(tree, '最新値を取得'), undefined);
 });
 test('preview starts in draft mode, separates hidden caution and coaching, switches with keyboard-native select',async()=>{
     const h=harness();let tree=await open(h);let focused=false;

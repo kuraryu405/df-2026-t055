@@ -11,13 +11,19 @@ const base = { schemaVersion: version, requestId: id, sessionId: id, eventId: id
 const assigned = { assignedTo: id, assignedAt: timestamp };
 const started = { startedBy: id, startedAt: timestamp };
 const acknowledged = { acknowledgedBy: id, acknowledgedAt: timestamp };
+export const staffSupportContextSchema = z.object({
+    learnerId: id, displayName: id, taskId: id, taskTitle: id, releaseId: id,
+    stepId: id, stepIndex: nonnegative, sessionRevision: nonnegative, sessionStatus,
+    actions: z.array(z.enum(['claim', 'start', 'acknowledge', 'resume', 'record']))
+}).strict();
+const context = { context: staffSupportContextSchema.optional() };
 export const supportRequestSchema = z.union([
-    z.object({ ...base, kind: z.literal('help'), status: z.literal('open') }).strict(),
-    z.object({ ...base, kind: z.literal('help'), status: z.literal('assigned'), ...assigned }).strict(),
-    z.object({ ...base, kind: z.literal('help'), status: z.literal('in_progress'), ...assigned, ...started }).strict(),
-    z.object({ ...base, kind: z.literal('help'), status: z.literal('acknowledged'), ...assigned, ...started, ...acknowledged }).strict(),
-    z.object({ ...base, kind: z.literal('stop'), status: z.literal('open') }).strict(),
-    z.object({ ...base, kind: z.literal('stop'), status: z.literal('acknowledged'), ...acknowledged }).strict()
+    z.object({ ...base, ...context, kind: z.literal('help'), status: z.literal('open') }).strict(),
+    z.object({ ...base, ...context, kind: z.literal('help'), status: z.literal('assigned'), ...assigned }).strict(),
+    z.object({ ...base, ...context, kind: z.literal('help'), status: z.literal('in_progress'), ...assigned, ...started }).strict(),
+    z.object({ ...base, ...context, kind: z.literal('help'), status: z.literal('acknowledged'), ...assigned, ...started, ...acknowledged }).strict(),
+    z.object({ ...base, ...context, kind: z.literal('stop'), status: z.literal('open') }).strict(),
+    z.object({ ...base, ...context, kind: z.literal('stop'), status: z.literal('acknowledged'), ...acknowledged }).strict()
 ]);
 export type SupportRequest = z.infer<typeof supportRequestSchema>;
 export type SupportStatus = z.infer<typeof supportStatusSchema>;
