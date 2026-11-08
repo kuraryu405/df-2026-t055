@@ -1,3 +1,4 @@
+import { learnerControlPath, imageFailureText, type LearnerControlLabel } from './learner-controls.ts';
 import { learnerStepPresentation, type LearnerDisplaySession } from './learner-display.ts';
 import { isManualDraft, releaseCopySource, beginReleaseCopy, type ReleaseCopyState } from './release-copy.ts';
 import { releaseCopyResponseSchema } from '../../../packages/shared/src/index.ts';
@@ -34,9 +35,11 @@ function Asset({ id, video = false, audio = false, startMs = 0, endMs, alt = '�
     endMs?: number;
 }) {
     const [url, setUrl] = useState('');
+    const [failedId, setFailedId] = useState('');
     useEffect(() => {
         let active = true, object = '';
         setUrl('');
+        setFailedId('');
         getToken().then(token => fetch(`/api/v1/assets/${id}`, { headers: { Authorization: `Bearer ${token}` } })).then(async (r) => {
             if (!r.ok)
                 throw Error();
@@ -44,6 +47,7 @@ function Asset({ id, video = false, audio = false, startMs = 0, endMs, alt = '�
             if (active)
                 setUrl(object);
         }).catch(() => {
+            if (active) setFailedId(id);
         });
         return () => {
             active = false;
@@ -51,7 +55,9 @@ function Asset({ id, video = false, audio = false, startMs = 0, endMs, alt = '�
                 URL.revokeObjectURL(object);
         };
     }, [id]);
-    return url ? audio ? <audio key={id} src={url} controls preload="metadata" aria-label="手順の読み上げ"/> : video ? <video key={`${id}:${startMs}:${endMs}`} src={`${url}#t=${startMs / 1000}${endMs === undefined ? '' : ',' + endMs / 1000}`} controls preload="metadata"/> : <img src={url} alt={alt}/> : <div className="placeholder">写真・動画を読み込み中</div>;
+    const failure = imageFailureText(alt, !audio && !video && failedId === id);
+    if (failure) return <div className="placeholder" role="status">{failure}</div>;
+    return url ? audio ? <audio key={id} src={url} controls preload="metadata" aria-label="手順の読み上げ"/> : video ? <video key={`${id}:${startMs}:${endMs}`} src={`${url}#t=${startMs / 1000}${endMs === undefined ? '' : ',' + endMs / 1000}`} controls preload="metadata"/> : <img key={id} src={url} alt={alt} onError={() => setFailedId(id)}/> : <div className="placeholder">写真・動画を読み込み中</div>;
 }
 function App() {
     const [path, setPath] = useState(location.pathname);
@@ -435,12 +441,15 @@ function Learner({ uid, path, action }: {
                     finally {
                         setBusy(false);
                     }
-                })}>はじめる</button></section>) : <p>職員をよんでください</p>)}</> : safety.stopped || session?.status === 'stopped' ? <section><h1>作業をやめました</h1><p>職員と そうだんしてください</p><p role="status">{message}</p></section> : safety.waiting || session?.status === 'waiting_help' ? <section><h1>職員をよんでいます</h1><p role="status">{message}</p><button disabled={busy || safety.pending.length > 0 || !session} onClick={() => void action(async () => {
+                })}>{learnerControlContent('はじめる')}</button></section>) : <p>職員をよんでください</p>)}</> : safety.stopped || session?.status === 'stopped' ? <section><h1>作業をやめました</h1><p>職員と そうだんしてください</p><p role="status">{message}</p></section> : safety.waiting || session?.status === 'waiting_help' ? <section><h1>職員をよんでいます</h1><p role="status">{message}</p><button disabled={busy || safety.pending.length > 0 || !session} onClick={() => void action(async () => {
                 const fresh = await api(`/me/sessions/${sessionId}`);
                 setSession(fresh);
                 await api(`/me/sessions/${sessionId}/events`, 'POST', { clientEventId: crypto.randomUUID(), expectedRevision: fresh.revision, type: 'resume' });
                 clearWaiting(localStorage, key);
                 setSession(await api(`/me/sessions/${sessionId}`));
-            })}>つづける</button></section> : session?.status === 'completed' ? <section><h1>おわりました</h1><p>職員をよんでください</p></section> : session ? <section><p className="position">{session.stepIndex + 1} / {session.steps.length}</p><Asset id={step!.imageAssetId} alt={step!.imageAltText}/>{step!.text !== undefined && <h1>{step!.text}</h1>}{step!.audioAssetId && <Asset key={step!.audioAssetId} id={step!.audioAssetId} audio/>}{step!.visibleCaution !== undefined && <p>{step!.visibleCaution}</p>}<div className="controls"><button disabled={busy || session.stepIndex === 0} onClick={() => void action(() => event('back'))}>もどる</button><button className="primary" disabled={busy} onClick={() => void action(() => event(session.stepIndex === session.steps.length - 1 ? 'complete' : 'next'))}>{session.stepIndex === session.steps.length - 1 ? 'おわる' : 'つぎへ'}</button></div></section> : <p>読み込み中です</p>}<div className="safety"><button className="help" onClick={() => requestSafety('help')} disabled={safety.stopped || session?.status === 'stopped'}>手伝って</button><button className="stop" onClick={() => requestSafety('stop')}>やめる</button></div></div>;
+            })}>{learnerControlContent('つづける')}</button></section> : session?.status === 'completed' ? <section><h1>おわりました</h1><p>職員をよんでください</p></section> : session ? <section><p className="position">{session.stepIndex + 1} / {session.steps.length}</p><Asset id={step!.imageAssetId} alt={step!.imageAltText}/>{step!.text !== undefined && <h1>{step!.text}</h1>}{step!.audioAssetId && <Asset key={step!.audioAssetId} id={step!.audioAssetId} audio/>}{step!.visibleCaution !== undefined && <p>{step!.visibleCaution}</p>}<div className="controls"><button disabled={busy || session.stepIndex === 0} onClick={() => void action(() => event('back'))}>{learnerControlContent('もどる')}</button><button className="primary" disabled={busy} onClick={() => void action(() => event(session.stepIndex === session.steps.length - 1 ? 'complete' : 'next'))}>{learnerControlContent(session.stepIndex === session.steps.length - 1 ? 'おわる' : 'つぎへ')}</button></div></section> : <p>読み込み中です</p>}<div className="safety"><button className="help" onClick={() => requestSafety('help')} disabled={safety.stopped || session?.status === 'stopped'}>{learnerControlContent('手伝って')}</button><button className="stop" onClick={() => requestSafety('stop')}>{learnerControlContent('やめる')}</button></div></div>;
+}
+function learnerControlContent(label: LearnerControlLabel) {
+    return <><svg className="control-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={learnerControlPath(label)}/></svg><span>{label}</span></>;
 }
 createRoot(document.getElementById('root')!).render(<App />);

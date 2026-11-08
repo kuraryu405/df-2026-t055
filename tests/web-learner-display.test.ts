@@ -19,6 +19,7 @@ const hooks = await import(hookUrl);
 let source = await readFile(new URL('../apps/web/src/main.tsx', import.meta.url), 'utf8');
 source = source.slice(source.indexOf('function Learner('), source.indexOf('\ncreateRoot('));
 const imports = `import React,{useState,useEffect,useRef} from ${JSON.stringify(hookUrl)};
+import {learnerControlPath} from ${JSON.stringify(new URL('../apps/web/src/learner-controls.ts',import.meta.url).href)};
 import {learnerStepPresentation} from ${JSON.stringify(new URL('../apps/web/src/learner-display.ts',import.meta.url).href)};
 import {hold,readSafety,flushSafety,safetyKey,clearWaiting} from ${JSON.stringify(new URL('../apps/web/src/safety.ts',import.meta.url).href)};
 const api=(...args)=>globalThis.learnerApi(...args), account='learner-a', Asset=()=>null;
@@ -100,8 +101,32 @@ for(const mode of ['photo_only','photo_text']) test(`${mode}: help, resume and i
 test('actual Asset uses manual audio controls and metadata preload without autoplay',async()=>{
     const main=await readFile(new URL('../apps/web/src/main.tsx',import.meta.url),'utf8');
     const source=main.slice(main.indexOf('function Asset('),main.indexOf('\nfunction App('));
-    const compiled=ts.transpileModule(`import React from '${import.meta.resolve('react')}';const useState=()=>['blob:approved',()=>{}],useEffect=()=>{};export ${source}`,{compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.ESNext}}).outputText;
+    const compiled=ts.transpileModule(`import React from '${import.meta.resolve('react')}';import {imageFailureText} from ${JSON.stringify(new URL('../apps/web/src/learner-controls.ts',import.meta.url).href)};let cursor=0;const useState=()=>[cursor++%2===0?'blob:approved':'',()=>{}],useEffect=()=>{};export ${source}`,{compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.ESNext}}).outputText;
     const {Asset}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
     const audio=Asset({id:'audio0',audio:true});assert.equal(audio.type,'audio');assert.equal(audio.props.controls,true);assert.equal(audio.props.preload,'metadata');assert.equal(audio.props.autoPlay,undefined);
     assert.equal(Asset({id:'image0',alt:'手元0'}).props.alt,'手元0');
+
+});
+
+test('all learner controls keep native keyboard semantics, visible text names and decorative inline icons', async()=>{
+    const check=(tree:any,label:string)=>{
+        const b=button(tree,label);assert.ok(b,label);
+        assert.equal(b.props.tabIndex,undefined);
+        assert.equal(b.props['aria-label'],undefined);
+        assert.equal(typeof b.props.onClick,'function');
+        const svg=nodes(b).find(n=>n.type==='svg');
+        assert.equal(svg.props['aria-hidden'],'true');
+        assert.equal(svg.props.focusable,'false');
+        assert.ok(nodes(svg).find(n=>n.type==='path').props.d);
+        assert.equal(nodes(svg).some(n=>n.type==='image'),false);
+    };
+    const h=harness(session());let tree=await open(h);
+    for(const label of ['もどる','つぎへ','手伝って','やめる'])check(tree,label);
+    await click(tree,'つぎへ');check(h.render(),'おわる');
+    await click(h.render(),'手伝って');check(h.render(),'つづける');
+    hooks.reset();Object.assign(globalThis,{learnerApi:async()=>({assignments:[{taskId:'task',title:'タオル'}]})});
+    const home=()=>{hooks.begin();return Learner({uid:'learner-a',path:'/me',action:async(fn:any)=>fn()});};
+    home();const timer=globalThis.setInterval;globalThis.setInterval=(()=>0) as any;
+    try{await hooks.flush();}finally{globalThis.setInterval=timer;}
+    check(home(),'はじめる');
 });
