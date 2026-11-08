@@ -129,10 +129,10 @@ export function StaffSupport({ api, getToken, go }: { api: Api; getToken: TokenP
             if (live.current) setBusy(previous => ({ ...previous, [id]: false }));
         }
     }
-    return <div className="staff-support"><button onClick={() => go('/staff')}>作業一覧</button><h1>支援要求</h1>
+    return <div className="staff-support"><div className="page-actions"><button className="dads-button" data-type="outline" data-size="md" onClick={() => go('/staff')}>作業一覧</button></div><p className="section-label">本人の作業を支える</p><h1>支援対応</h1><p className="page-lead">担当と対応状況を確かめて支援します。記録は後から入力できます。</p>
         <p role="status">{connection === 'connected' ? '支援状態の更新を受信しています。' : '通信を確認しながら、3秒ごとに一覧を取得します。'}</p>
-        <div className="support-tabs"><button aria-pressed={!completed} onClick={() => setCompleted(false)}>未完了</button>
-            <button aria-pressed={completed} onClick={() => setCompleted(true)}>対応完了・後から記録</button></div>
+        <div className="support-tabs" role="group" aria-label="表示する支援要求"><button className="dads-button" data-type="outline" data-size="md" aria-pressed={!completed} onClick={() => setCompleted(false)}>未完了</button>
+            <button className="dads-button" data-type="outline" data-size="md" aria-pressed={completed} onClick={() => setCompleted(true)}>対応完了・後から記録</button></div>
         {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
         {!items.length && <p>{completed ? '対応完了の要求はありません。' : '未対応の要求はありません。'}</p>}
         {items.map(request => {
@@ -142,12 +142,12 @@ export function StaffSupport({ api, getToken, go }: { api: Api; getToken: TokenP
                 {context ? <><p>{context.displayName} ／ {context.taskTitle} ／ 工程 {context.stepIndex + 1}</p><p>作業の状態：{context.sessionStatus === 'stopped' ? '停止済み' : context.sessionStatus === 'waiting_help' ? '支援待ち' : context.sessionStatus === 'completed' ? '完了' : '作業中'}</p></>
                     : <p>対象の情報を確認できません。担当者に確認してください。</p>}
                 {'assignedTo' in request && <p>担当：{request.assignedTo}</p>}
-                {actions.includes('claim') && <button disabled={busy[id]} onClick={() => void operate(request, 'claim')}>担当します</button>}
-                {actions.includes('start') && <button disabled={busy[id]} onClick={() => void operate(request, 'start')}>対応を始める</button>}
-                {actions.includes('acknowledge') && <button disabled={busy[id]} onClick={() => void operate(request, 'acknowledge')}>{request.kind === 'stop' ? '停止通知を確認した' : '対応完了のみを記録'}</button>}
+                {actions.includes('claim') && <button className="dads-button" data-type="outline" data-size="md" disabled={busy[id]} onClick={() => void operate(request, 'claim')}>担当します</button>}
+                {actions.includes('start') && <button className="dads-button" data-type="outline" data-size="md" disabled={busy[id]} onClick={() => void operate(request, 'start')}>対応を始める</button>}
+                {actions.includes('acknowledge') && <button className="dads-button" data-type="outline" data-size="md" disabled={busy[id]} onClick={() => void operate(request, 'acknowledge')}>{request.kind === 'stop' ? '停止通知を確認した' : '対応完了のみを記録'}</button>}
                 {actions.includes('resume') && <div><label className="check"><input type="checkbox" checked={consent[id] ?? false} onChange={e => setConsent(previous => ({ ...previous, [id]: e.target.checked }))}/>本人に再開の希望を確かめました</label>
-                    <button disabled={busy[id] || !consent[id]} onClick={() => void operate(request, 'resume')}>対応を終えてつづける</button></div>}
-                {actions.includes('record') && <button onClick={() => void openRecord(request)}>支援記録を開く</button>}
+                    <button className="dads-button" data-type="outline" data-size="md" disabled={busy[id] || !consent[id]} onClick={() => void operate(request, 'resume')}>対応を終えてつづける</button></div>}
+                {actions.includes('record') && <button className="dads-button" data-type="outline" data-size="md" onClick={() => void openRecord(request)}>支援記録を開く</button>}
                 {request.kind === 'stop' && <p>通知の確認では、本人の停止を解除しません。</p>}
             </section>;
         })}
@@ -160,10 +160,10 @@ export function StaffSupport({ api, getToken, go }: { api: Api; getToken: TokenP
             {editor.error && <p role="alert" className="error">{editor.error}</p>}{editor.notice && <p role="status">{editor.notice}{editor.dirty ? '追記は未保存です。' : ''}</p>}
             {editor.conflict && <aside className="record-conflict"><h3>最新の保存内容（版 {editor.conflict.revision}）</h3>
                 <p>つまずき：{editor.conflict.observedDifficulty || '未記入'}</p><p>支援：{editor.conflict.assistanceGiven || '未記入'}</p><p>次回案：{editor.conflict.improvementSuggestion || '未記入'}</p>
-                <button onClick={() => changeEditor(id, value => ({ ...value, revision: value.conflict!.revision, conflict: undefined, error: '', notice: '入力を残しました。保存する内容を確認してください。' }))}>入力を残して、最新版を基に編集を続ける</button></aside>}
-            {!editor.loaded && <button onClick={() => void refreshRecord(id)}>記録の取得をやり直す</button>}
-            <button disabled={!editor.loaded || editor.saving || !!editor.conflict} onClick={() => void saveRecord(id)}>{editor.saving ? '保存しています' : '記録を保存する'}</button>
-            <button onClick={() => changeEditor(id, value => ({ ...value, open: false }))}>後で記録する</button>
+                <button className="dads-button" data-type="outline" data-size="md" onClick={() => changeEditor(id, value => ({ ...value, revision: value.conflict!.revision, conflict: undefined, error: '', notice: '入力を残しました。保存する内容を確認してください。' }))}>入力を残して、最新版を基に編集を続ける</button></aside>}
+            {!editor.loaded && <button className="dads-button" data-type="outline" data-size="md" onClick={() => void refreshRecord(id)}>記録の取得をやり直す</button>}
+            <button className="dads-button" data-type="outline" data-size="md" disabled={!editor.loaded || editor.saving || !!editor.conflict} onClick={() => void saveRecord(id)}>{editor.saving ? '保存しています' : '記録を保存する'}</button>
+            <button className="dads-button" data-type="outline" data-size="md" onClick={() => changeEditor(id, value => ({ ...value, open: false }))}>後で記録する</button>
         </section>)}
     </div>;
 }

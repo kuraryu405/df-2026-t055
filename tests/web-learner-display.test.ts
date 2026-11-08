@@ -19,7 +19,7 @@ const hooks = await import(hookUrl);
 let source = await readFile(new URL('../apps/web/src/main.tsx', import.meta.url), 'utf8');
 source = source.slice(source.indexOf('function Learner('), source.indexOf('\ncreateRoot('));
 const imports = `import React,{useState,useEffect,useRef} from ${JSON.stringify(hookUrl)};
-import {learnerControlPath} from ${JSON.stringify(new URL('../apps/web/src/learner-controls.ts',import.meta.url).href)};
+import {learnerControlPaths} from ${JSON.stringify(new URL('../apps/web/src/learner-controls.ts',import.meta.url).href)};
 import {learnerStepPresentation} from ${JSON.stringify(new URL('../apps/web/src/learner-display.ts',import.meta.url).href)};
 import {hold,readSafety,flushSafety,safetyKey,clearWaiting,readSessionStart,beginSessionStart,holdStartIntent,startKey} from ${JSON.stringify(new URL('../apps/web/src/safety.ts',import.meta.url).href)};
 const api=(...args)=>globalThis.learnerApi(...args), account='learner-a', Asset=()=>null;

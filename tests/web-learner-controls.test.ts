@@ -3,14 +3,28 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import React from 'react';
 import ts from 'typescript';
-import { learnerControlPath, imageFailureText, type LearnerControlLabel } from '../apps/web/src/learner-controls.ts';
+import { learnerControlPaths, imageFailureText, type LearnerControlLabel } from '../apps/web/src/learner-controls.ts';
 
-test('seven original pictograms are distinct and failures retain approved alt text',()=>{
+test('seven sourced pictograms are distinct and failures retain approved alt text',()=>{
     const labels: LearnerControlLabel[]=['はじめる','もどる','つぎへ','おわる','手伝って','やめる','つづける'];
-    assert.equal(new Set(labels.map(learnerControlPath)).size,7);
-    assert.notEqual(learnerControlPath('手伝って'),learnerControlPath('やめる'));
+    assert.equal(new Set(labels.map(label => learnerControlPaths(label).join("\n"))).size,7);
+    assert.notDeepEqual(learnerControlPaths('手伝って'),learnerControlPaths('やめる'));
     assert.equal(imageFailureText('タオルの端を合わせる',true),'写真を表示できません：タオルの端を合わせる');
     assert.equal(imageFailureText('手元',false),undefined);
+});
+
+test('actual controls preserve independent upstream SVG paths and their accessible label',async()=>{
+    const main=await readFile(new URL('../apps/web/src/main.tsx',import.meta.url),'utf8');
+    const source=main.slice(main.indexOf('function learnerControlContent('),main.indexOf('\ncreateRoot('));
+    const imports=`import React from ${JSON.stringify(import.meta.resolve('react'))};\nimport {learnerControlPaths} from ${JSON.stringify(new URL('../apps/web/src/learner-controls.ts',import.meta.url).href)};\nexport `;
+    const compiled=ts.transpileModule(imports+source,{compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.ESNext}}).outputText;
+    const {learnerControlContent}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
+    for(const label of ['はじめる','もどる','つぎへ','つづける','おわる','手伝って','やめる'] as const){
+        const [svg,text]=learnerControlContent(label).props.children;
+        assert.equal(svg.props['aria-hidden'],'true');assert.equal(svg.props.focusable,'false');
+        assert.equal(text.props.children,label);
+        assert.deepEqual(React.Children.toArray(svg.props.children).map((path:any)=>path.props.d),learnerControlPaths(label));
+    }
 });
 
 test('actual Asset replaces decode and HTTP failures and recovers on asset change; media unchanged',async()=>{
@@ -42,14 +56,18 @@ const getToken=async()=>'test';export `;
     }finally{globalThis.fetch=fetchBefore;}
 });
 
-test('CSS contract: native focus, non-color disabled cue, narrow and 200% text wrapping',async()=>{
-    const css=await readFile(new URL('../apps/web/src/style.css',import.meta.url),'utf8');
-    assert.match(css,/button:focus-visible[^}]*outline:4px solid #e3a830;outline-offset:3px/);
-    assert.match(css,/\.learner button:disabled\{[^}]*border:3px dashed currentColor/);
-    assert.match(css,/\.learner button\{[^}]*max-width:100%;min-width:0;width:100%[^}]*white-space:normal;overflow-wrap:anywhere/);
-    assert.match(css,/\.learner \.control-icon\{width:1.5em;height:1.5em;flex:none/);
-    assert.match(css,/@media\(max-width:760px\)\{\.learner \.controls,\.learner \.safety\{grid-template-columns:minmax\(0,1fr\)/);
-    assert.match(css,/\.learner\{padding-bottom:16em\}\.learner \.safety\{position:fixed;bottom:0/);
-    // Structural checks only: em icons scale with 200% text; no fixed height,
-    // one flexible column and normal wrapping. Real layout/keyboard/AT remain unverified.
+test('DADS palette keeps text, primary, help and stop distinguishable at required contrast',async()=>{
+    const tokens=await readFile(new URL('../apps/web/src/vendor/dads/tokens.css',import.meta.url),'utf8');
+    const colors=Object.fromEntries([...tokens.matchAll(/--([\w-]+):\s*(#[\da-f]{6});/gi)].map(match=>[match[1],match[2]]));
+    const luminance=(hex:string)=>hex.slice(1).match(/../g)!.map(c=>parseInt(c,16)/255).map(c=>c<=.04045?c/12.92:((c+.055)/1.055)**2.4).reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0);
+    const contrast=(a:string,b:string)=>{const x=luminance(a),y=luminance(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05)};
+    for(const [foreground,background] of [
+        ['color-neutral-solid-gray-900','color-neutral-white'],
+        ['color-neutral-solid-gray-700','color-neutral-solid-gray-50'],
+        ['color-primitive-blue-900','color-neutral-white'],
+        ['color-primitive-blue-1000','color-primitive-blue-50'],
+        ['color-neutral-solid-gray-900','color-primitive-yellow-50'],
+        ['color-neutral-white','color-primitive-red-1000']
+    ]) assert.ok(contrast(colors[foreground],colors[background])>=4.5,`${foreground} / ${background}`);
+    // Real focus, reflow and fixed-bar geometry are checked in the browser audit.
 });

@@ -17,7 +17,7 @@ async function page(api: (...args: any[]) => Promise<any>, path = '/me/sessions/
     const file = new URL('../apps/web/src/main.tsx', import.meta.url), main = await readFile(file, 'utf8');
     const learner = main.slice(main.indexOf('function Learner('), main.indexOf('\ncreateRoot('));
     const source = `import React,{useState,useEffect,useRef} from 'react';
-import {learnerControlPath} from './learner-controls.ts';
+import {learnerControlPaths} from './learner-controls.ts';
 import {learnerStepPresentation} from './learner-display.ts';
 import {learnerSupportNotificationSchema} from '../../../packages/shared/src/support.ts';
 import {hold,readSafety,flushSafety,safetyKey,clearWaiting,readSessionStart,beginSessionStart,holdStartIntent,startKey} from './safety.ts';

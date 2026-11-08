@@ -1,15 +1,18 @@
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, type LearnerProfileDetail } from '../../../packages/shared/src/learner-profile.ts';
 
+export const noteKeys = ['learnerWishes', 'staffObservations', 'staffSuggestions', 'confirmedGuidance'] as const;
+export type NoteKey = (typeof noteKeys)[number];
+
 export const emptyLearnerForm = {
-    confirmedGuidance: '', disabilityAction: 'keep', displayName: '', learnerWishes: '', staffObservations: '', staffSuggestions: '',
+    confirmedGuidance: [] as string[], disabilityAction: 'keep', displayName: '', learnerWishes: [] as string[], staffObservations: [] as string[], staffSuggestions: [] as string[],
     displayMode: '', sentenceLength: '', audioGuidance: '', splitHints: '',
     disabilityDetail: '', disabilitySource: '', disabilityConfirmedAt: '',
 };
 export type LearnerForm = typeof emptyLearnerForm;
 export function buildLearnerProfile(form: LearnerForm) {
     const body: Record<string, unknown> = { displayName: form.displayName };
-    for (const key of ['learnerWishes', 'staffObservations', 'staffSuggestions', 'confirmedGuidance'] as const) {
-        const notes = form[key].split('\n').map(line => line.trim()).filter(Boolean);
+    for (const key of noteKeys) {
+        const notes = form[key].map(line => line.trim()).filter(Boolean);
         if (notes.length) body[key] = notes;
     }
     const preferences: Record<string, unknown> = {};
@@ -33,8 +36,8 @@ export function buildLearnerProfile(form: LearnerForm) {
 
 export function learnerProfileToForm(profile: LearnerProfileDetail): LearnerForm {
     const form = { ...emptyLearnerForm, displayName: profile.displayName };
-    for (const key of ['learnerWishes', 'staffObservations', 'staffSuggestions', 'confirmedGuidance'] as const)
-        form[key] = profile[key]?.join('\n') ?? '';
+    for (const key of noteKeys)
+        form[key] = profile[key] ? [...profile[key]] : [];
     const p = profile.preferences;
     form.displayMode = p.displayMode ?? '';
     form.sentenceLength = p.sentenceLength === undefined ? '' : String(p.sentenceLength);
@@ -55,7 +58,7 @@ export function buildLearnerProfileUpdate(form: LearnerForm, expectedRevision: n
     });
     return learnerProfileUpdateRequestSchema.parse({ ...body, expectedRevision,
         preferences: body.preferences ?? {},
-        ...Object.fromEntries(['learnerWishes', 'staffObservations', 'staffSuggestions', 'confirmedGuidance'].map(key => [key, body[key as keyof typeof body] ?? []])),
+        ...Object.fromEntries(noteKeys.map(key => [key, body[key as keyof typeof body] ?? []])),
         ...(form.disabilityAction === 'delete' ? { disabilityInfo: null } : {}),
     });
 }
