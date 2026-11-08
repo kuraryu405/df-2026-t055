@@ -2,7 +2,7 @@ import http, { type Request, type Response, type NextFunction } from './http.ts'
 import { uploadVideo } from './upload.ts';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, draftPatchSchema, sessionStartSchema, type Member, type LearnerSessionDTO } from '../../../packages/shared/src/index.ts';
+import { editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, type Member, type LearnerSessionDTO } from '../../../packages/shared/src/index.ts';
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
 import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
@@ -317,7 +317,9 @@ export function createApp(options: {
                 fail(409, 'REVISION_CONFLICT');
             const audioAssets: Doc[] = [];
             const learner = await get('learners', d.learnerId, res);
-            if ((fresh.audioGuidance ?? learner.preferences.audioGuidance) === true) {
+            const audioGuidance = (fresh.audioGuidance ?? learner.preferences.audioGuidance) === true;
+            const displayMode = fresh.displayMode ?? 'photo_text';
+            if (audioGuidance) {
                 try {
                     for (const s of steps) {
                         const audio = await tts.synthesize(s.text);
@@ -336,14 +338,15 @@ export function createApp(options: {
                 }
             }
             const learnerSteps = steps.map((s, i) => ({
-                stepId: s.stepId, order: i + 1, imageAssetId: assets[i].id, ...(audioAssets[i] ? { audioAssetId: audioAssets[i].id } : {}), text: s.text, visibleCaution: s.visibleCaution
+                stepId: s.stepId, order: i + 1, imageAssetId: assets[i].id, imageAltText: s.imageAltText?.trim() || s.text, ...(audioAssets[i] ? { audioAssetId: audioAssets[i].id } : {}), text: s.text, visibleCaution: s.visibleCaution
             }));
             const staffGuide = steps.map(({ stepId, sourceStartMs, sourceEndMs, verifiedObservation, verifiedSpeech, coaching, completionCheck }) => ({
                 stepId, sourceStartMs, sourceEndMs, verifiedObservation, verifiedSpeech, coaching, completionCheck
             }));
-            const r = doc(d.orgId, {
-                id: releaseId, taskId: d.taskId, learnerId: d.learnerId, sourceDraftId: d.id, sourceRevision: d.revision, version: (await list('releases', res)).filter(r => r.taskId === d.taskId && r.learnerId === d.learnerId).length + 1, learnerSteps, staffGuide, approvedBy: member(res).uid, approvedAt: now(), approvalRequestId, contentHash: createHash('sha256').update(JSON.stringify({ learnerSteps, staffGuide })).digest('hex')
+            const snapshot = releaseSchema.parse({
+                schemaVersion: '1', releaseId, taskId: d.taskId, learnerId: d.learnerId, sourceDraftId: d.id, sourceRevision: d.revision, version: (await list('releases', res)).filter(r => r.taskId === d.taskId && r.learnerId === d.learnerId).length + 1, displayMode, audioGuidance, appliedSupportRecordRefs: fresh.appliedSupportRecordRefs ?? [], learnerSteps, staffGuide, approvedBy: member(res).uid, approvedAt: now(), contentHash: createHash('sha256').update(JSON.stringify({ displayMode, audioGuidance, learnerSteps, staffGuide })).digest('hex')
             });
+            const r = doc(d.orgId, { ...snapshot, id: releaseId, approvalRequestId });
             for (const a of [...assets, ...audioAssets])
                 await db.put('assets', a);
             await db.put('releases', r);
