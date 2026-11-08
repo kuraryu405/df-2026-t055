@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { releaseCopyRequestSchema, releaseCopyResponseSchema, draftDetailSchema, editedStepSchema, eventSchema, generationRequestSchema, approvalRequestSchema, releaseSchema, draftPatchSchema, sessionStartSchema, normalizeRelease, projectReleaseToSessionSteps, learnerSessionSchema, type Member } from '../../../packages/shared/src/index.ts';
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
 import { supportResumeRequestSchema, supportResumeResponseSchema, supportRecordSchema, supportRecordSaveRequestSchema, supportOperationRequestSchema, supportStartResponseSchema, supportAcknowledgeResponseSchema, supportClaimResponseSchema, supportRequestListResponseSchema, supportRequestStatusQuerySchema } from '../../../packages/shared/src/support.ts';
-import { MemoryRepository, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
+import { MemoryRepository, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
+import { configuredAuth } from './firebase-auth.ts';
 import { configuredStorage } from './cloud-storage.ts';
 import { configuredRepository } from './firestore-repository.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
@@ -47,7 +48,7 @@ export function createApp(options: {
         seed(db);
     const storage = options.storage ?? configuredStorage();
     const tts = options.tts ?? configuredTts();
-    const auth = options.auth ?? new DemoAuth(db);
+    const auth = configuredAuth(db, process.env, undefined, options.auth);
     const app = http();
     const notifications = supportWebSocket(db, auth);
     app.upgrade = notifications.upgrade;
@@ -68,8 +69,9 @@ export function createApp(options: {
                     fail(403, 'INTERNAL_ONLY');
                 return next();
             }
-            const m = await auth.verify((req.headers.authorization ?? '').replace(/^Bearer /, ''));
-            if (!m)
+            const bearer = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '');
+            const m = bearer ? await auth.verify(bearer[1]) : undefined;
+            if (!m || (m.expiresAt !== undefined && (!Number.isFinite(m.expiresAt) || m.expiresAt <= Date.now())))
                 fail(401, 'UNAUTHENTICATED');
             res.locals.member = m;
             if (!['GET', 'HEAD'].includes(req.method)) {

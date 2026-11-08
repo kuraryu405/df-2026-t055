@@ -1,5 +1,5 @@
-// Demo authentication matches the HTTP client; Firebase token refresh belongs to #36.
-export function subscribeSupport(token: string, sessionId: string | undefined, receive: (value: unknown) => void) {
+import type { TokenProvider } from './auth.ts';
+export function subscribeSupport(getToken: TokenProvider, sessionId: string | undefined, receive: (value: unknown) => void) {
     let active = true, socket: WebSocket, timer: ReturnType<typeof setTimeout>;
     function connect() {
         if (!active) return;
@@ -7,7 +7,14 @@ export function subscribeSupport(token: string, sessionId: string | undefined, r
         url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         if (sessionId) url.searchParams.set('sessionId', sessionId);
         socket = new WebSocket(url);
-        socket.onopen = () => socket.send(JSON.stringify({ type: 'auth', idToken: token }));
+        const current = socket;
+        socket.onopen = async () => {
+            try {
+                const token = await getToken();
+                if (active && current === socket && current.readyState === WebSocket.OPEN)
+                    current.send(JSON.stringify({ type: 'auth', idToken: token }));
+            } catch { current.close(); }
+        };
         socket.onmessage = event => { try { receive(JSON.parse(event.data)); } catch { socket.close(); } };
         socket.onclose = () => { if (active) timer = setTimeout(connect, 3000); };
         socket.onerror = () => socket.close();

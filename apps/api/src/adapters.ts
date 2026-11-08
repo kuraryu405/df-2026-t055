@@ -96,6 +96,7 @@ export interface Auth {
 }
 export class DemoAuth implements Auth {
     constructor(private db: Repository) {
+        if (process.env.NODE_ENV === 'production') throw Error('DEMO_AUTH_DISABLED');
     }
     async verify(t: string) {
         const member = await this.db.get('members', t) as Member | undefined;

@@ -2,15 +2,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from 'node:net';
 import { once } from 'node:events';
+import { FirebaseAuth } from '../apps/api/src/firebase-auth.ts';
 import { createApp } from '../apps/api/src/app.ts';
 import { MemoryRepository, DemoAuth, seed, doc } from '../apps/api/src/adapters.ts';
 import { learnerSupportNotificationSchema, staffSupportNotificationSchema } from '../packages/shared/src/support.ts';
 
-async function harness(t: any, verify?: DemoAuth['verify']) {
+async function harness(t: any, verify?: DemoAuth['verify'], firebase = false) {
     const db = new MemoryRepository(); seed(db);
     db.put('sessions', doc('demo', { id: 's', learnerId: 'a', releaseId: 'r', status: 'waiting_help', stepIndex: 2, revision: 1, activeSupportRequestId: 'q', staffMemo: 'PRIVATE' }));
     db.put('supportRequests', doc('demo', { id: 'q', sessionId: 's', eventId: 'e', kind: 'help', status: 'open', revision: 1, staffMemo: 'PRIVATE', profile: 'PRIVATE' }));
-    const { app } = createApp({ db, ...(verify ? { auth: { verify } } : {}) });
+    const auth = firebase ? new FirebaseAuth(db, { async verifyIdToken(token, checkRevoked) {
+        assert.equal(checkRevoked, true);
+        if (token === 'invalid') throw Error('PRIVATE_TOKEN');
+        return { uid: token, exp: token === 'expired' ? 1 : Math.floor(Date.now() / 1000) + 3600 };
+    } }, 'demo') : verify ? { verify } : undefined;
+    const { app } = createApp({ db, auth });
     const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
     const sockets: ReturnType<typeof connect>[] = [];
     t.after(() => { for (const socket of sockets) socket.destroy(); server.close(); });
@@ -140,4 +146,13 @@ test('WebSocket: マスクなし・バイナリ・巨大フレームを拒否', 
     for (const bytes of [Buffer.from([0x81, 2, 123, 125]), Buffer.from([0x82, 0x80]), Buffer.from([0x81, 0xff])]) {
         const ws = await h.open(); ws.socket.write(bytes); assert.ok((await ws.next()).close);
     }
+});
+
+test('WebSocket: Firebase verified UID uses members and preserves subscription authorization', { timeout: 10000 }, async t => {
+    const h = await harness(t, undefined, true);
+    for (const [token, query] of [['invalid', ''], ['expired', ''], ['unknown', ''], ['other-staff', ''], ['newcomer', ''], ['learner-b', '?sessionId=s']]) {
+        const ws = await h.open(query); ws.auth(token); assert.deepEqual(await ws.next(), { close: 1008 });
+    }
+    const staff = await h.open(); staff.auth('staff'); assert.equal((await staff.next()).type, 'support.snapshot');
+    const learner = await h.open('?sessionId=s'); learner.auth('learner-a'); assert.equal((await learner.next()).type, 'session.support.snapshot');
 });

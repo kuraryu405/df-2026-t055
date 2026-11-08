@@ -1,3 +1,4 @@
+import { createTokenProvider } from './auth.ts';
 import { subscribeSupport } from './support-ws.ts';
 import { staffSupportNotificationSchema, learnerSupportNotificationSchema } from '../../../packages/shared/src/support.ts';
 import React, { useEffect, useState, useRef } from 'react';
@@ -7,8 +8,9 @@ import { hold, readSafety, flushSafety, safetyKey, clearWaiting } from './safety
 import './style.css';
 const accounts = [['staff', '職員'], ['learner-a', '本人 Aさん'], ['learner-b', '本人 Bさん'], ['newcomer', '新人']] as const;
 let account = localStorage.getItem('demoAccount') ?? 'staff';
+const getToken = createTokenProvider(() => account);
 async function api(path: string, method = 'GET', body?: unknown) {
-    const r = await fetch(`/api/v1${path}`, { method, headers: { Authorization: `Bearer ${account}`, ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: body instanceof FormData ? body : JSON.stringify(body) }) });
+    const r = await fetch(`/api/v1${path}`, { method, headers: { Authorization: `Bearer ${await getToken()}`, ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: body instanceof FormData ? body : JSON.stringify(body) }) });
     const data = await r.json();
     if (!r.ok)
         throw Object.assign(Error(`${data.error?.code ?? r.status}：${r.status === 409 ? '状態が変わりました。再取得してください' : data.error?.message ?? '通信を確認してください'}`), { status: r.status, code: data.error?.code });
@@ -29,7 +31,7 @@ function Asset({ id, video = false, audio = false, startMs = 0, endMs }: {
     useEffect(() => {
         let active = true, object = '';
         setUrl('');
-        fetch(`/api/v1/assets/${id}`, { headers: { Authorization: `Bearer ${account}` } }).then(async (r) => {
+        getToken().then(token => fetch(`/api/v1/assets/${id}`, { headers: { Authorization: `Bearer ${token}` } })).then(async (r) => {
             if (!r.ok)
                 throw Error();
             object = URL.createObjectURL(await r.blob());
@@ -212,7 +214,7 @@ function Support({ action }: {
     useEffect(() => {
         void action(load);
         const t = setInterval(() => void action(load), 3000);
-        const unsubscribe = subscribeSupport(account, undefined, value => {
+        const unsubscribe = subscribeSupport(getToken, undefined, value => {
             staffSupportNotificationSchema.parse(value);
             void action(load);
         });
@@ -323,7 +325,7 @@ function Learner({ uid, path, action }: {
         };
         const poll = async () => { try { apply(await api(`/me/sessions/${sessionId}`)); } catch { /* Keep waiting during disconnects. */ } };
         const timer = setInterval(() => void poll(), 3000);
-        const unsubscribe = subscribeSupport(uid, sessionId, value => apply(learnerSupportNotificationSchema.parse(value).payload));
+        const unsubscribe = subscribeSupport(getToken, sessionId, value => apply(learnerSupportNotificationSchema.parse(value).payload));
         return () => { active = false; clearInterval(timer); unsubscribe(); };
     }, [uid, sessionId, safety.waiting, safety.stopped, session?.status]);
     const requestSafety = (type: 'help' | 'stop') => {
