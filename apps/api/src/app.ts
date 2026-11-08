@@ -7,6 +7,7 @@ import { releaseCopyRequestSchema, releaseCopyResponseSchema, draftDetailSchema,
 import { learnerProfileCreateRequestSchema, learnerProfileUpdateRequestSchema, learnerProfileDetailSchema, learnerProfileListResponseSchema, toLearnerProfileSummary } from '../../../packages/shared/src/learner-profile.ts';
 import { supportResumeRequestSchema, supportResumeResponseSchema, supportRecordSchema, supportRecordSaveRequestSchema, supportOperationRequestSchema, supportStartResponseSchema, supportAcknowledgeResponseSchema, supportClaimResponseSchema, supportRequestListResponseSchema, supportRequestStatusQuerySchema } from '../../../packages/shared/src/support.ts';
 import { MemoryRepository, LocalStorage, DemoAuth, seed, doc, id, now, type Repository, type Storage, type Auth, type Doc } from './adapters.ts';
+import { configuredRepository } from './firestore-repository.ts';
 import { configuredTts, type TtsAdapter } from './tts.ts';
 import { media } from './media.ts';
 export class HttpError extends Error {
@@ -40,9 +41,9 @@ export function createApp(options: {
     modelId?: string;
     runJob?: (jobId: string) => Promise<void>;
 } = {}) {
-    const db = options.db ?? new MemoryRepository();
-    if (!options.db)
-        seed(db as MemoryRepository);
+    const db = options.db ?? configuredRepository();
+    if (!options.db && db instanceof MemoryRepository)
+        seed(db);
     const storage = options.storage ?? new LocalStorage();
     const tts = options.tts ?? configuredTts();
     const auth = options.auth ?? new DemoAuth(db);
@@ -209,36 +210,41 @@ export function createApp(options: {
         staff(res);
         const { clientRequestId } = releaseCopyRequestSchema.parse(req.body);
         const source = await get('releases', req.params.id, res);
+        const priorCopy = (await list('drafts', res)).find(d => d.sourceReleaseId === source.id && d.clientRequestId === clientRequestId);
+        if (priorCopy) return res.status(201).json(releaseCopyResponseSchema.parse({ schemaVersion: '1', draftId: priorCopy.id, status: 'editing', revision: priorCopy.revision }));
+        // Prepare media once; transaction retries only publish metadata.
+        const copiedAssets: Doc[] = [];
+        const release = savedRelease(source);
+        const d = doc(source.orgId, {
+            sourceReleaseId: source.id, clientRequestId, taskId: release.taskId, learnerId: release.learnerId,
+            status: 'editing', revision: 0, displayMode: release.displayMode, audioGuidance: release.audioGuidance,
+            appliedSupportRecordRefs: release.appliedSupportRecordRefs, updatedBy: member(res).uid
+        });
+        const editedSteps = [];
+        for (const step of release.learnerSteps) {
+            const guide = release.staffGuide.find(g => g.stepId === step.stepId);
+            if (!guide)
+                fail(422, 'INVALID_STEPS');
+            const image = await get('assets', step.imageAssetId, res);
+            if (image.kind !== 'image' || image.visibility !== 'approved' || image.releaseId !== source.id)
+                fail(422, 'INVALID_IMAGE');
+            const asset = doc(d.orgId, {
+                kind: 'image', objectPath: `draft/${d.orgId}/${d.id}/${id()}.jpg`, generation: 1,
+                mimeType: image.mimeType, sourceVideoId: image.sourceVideoId, frameMs: image.frameMs,
+                draftId: d.id, visibility: 'staff'
+            });
+            await storage.copy(image.objectPath, asset.objectPath);
+            copiedAssets.push(asset);
+            const { order, audioAssetId, ...content } = step;
+            editedSteps.push(editedStepSchema.parse({ ...content, ...guide, imageAssetId: asset.id, frameMs: asset.frameMs }));
+        }
+        d.editedSteps = editedSteps;
+        d.reviewChecks = { presentationConfirmed: false, flagResolution: '', steps: Object.fromEntries(editedSteps.map(s => [s.stepId, { videoVerified: false, photoTextVerified: false }])) };
         const result = await db.transaction(async () => {
             const existing = (await list('drafts', res)).find(d => d.sourceReleaseId === source.id && d.clientRequestId === clientRequestId);
             if (existing)
                 return existing;
-            const release = savedRelease(source);
-            const d = doc(source.orgId, {
-                sourceReleaseId: source.id, clientRequestId, taskId: release.taskId, learnerId: release.learnerId,
-                status: 'editing', revision: 0, displayMode: release.displayMode, audioGuidance: release.audioGuidance,
-                appliedSupportRecordRefs: release.appliedSupportRecordRefs, updatedBy: member(res).uid
-            });
-            const editedSteps = [];
-            for (const step of release.learnerSteps) {
-                const guide = release.staffGuide.find(g => g.stepId === step.stepId);
-                if (!guide)
-                    fail(422, 'INVALID_STEPS');
-                const image = await get('assets', step.imageAssetId, res);
-                if (image.kind !== 'image' || image.visibility !== 'approved' || image.releaseId !== source.id)
-                    fail(422, 'INVALID_IMAGE');
-                const asset = doc(d.orgId, {
-                    kind: 'image', objectPath: `draft/${d.orgId}/${d.id}/${id()}.jpg`, generation: 1,
-                    mimeType: image.mimeType, sourceVideoId: image.sourceVideoId, frameMs: image.frameMs,
-                    draftId: d.id, visibility: 'staff'
-                });
-                await storage.copy(image.objectPath, asset.objectPath);
-                await db.put('assets', asset);
-                const { order, audioAssetId, ...content } = step;
-                editedSteps.push(editedStepSchema.parse({ ...content, ...guide, imageAssetId: asset.id, frameMs: asset.frameMs }));
-            }
-            d.editedSteps = editedSteps;
-            d.reviewChecks = { presentationConfirmed: false, flagResolution: '', steps: Object.fromEntries(editedSteps.map(s => [s.stepId, { videoVerified: false, photoTextVerified: false }])) };
+            for (const asset of copiedAssets) await db.put('assets', asset);
             await db.put('drafts', d);
             return d;
         });
@@ -367,6 +373,29 @@ export function createApp(options: {
             await storage.copy(source.objectPath, a.objectPath);
             assets.push(a);
         }
+        // TTS and Storage must not run inside a retryable Firestore callback.
+        const audioAssets: Doc[] = [];
+        const learner = await get('learners', d.learnerId, res);
+        const audioGuidance = (d.audioGuidance ?? learner.preferences.audioGuidance) === true;
+        const displayMode = d.displayMode ?? 'photo_text';
+        if (audioGuidance) {
+            try {
+                for (const s of steps) {
+                    const audio = await tts.synthesize(s.text);
+                    if (!audio.bytes.length || audio.mimeType !== 'audio/wav' || !Number.isFinite(audio.durationMs) || audio.durationMs <= 0)
+                        throw Error('INVALID_TTS_AUDIO');
+                    const a = doc(d.orgId, {
+                        kind: 'audio', objectPath: `approved/${d.orgId}/${releaseId}/${id()}.wav`,
+                        generation: 1, mimeType: audio.mimeType, durationMs: audio.durationMs,
+                        visibility: 'approved', releaseId
+                    });
+                    await storage.put(a.objectPath, audio.bytes);
+                    audioAssets.push(a);
+                }
+            } catch {
+                fail(502, 'TTS_GENERATION_FAILED');
+            }
+        }
         const result = await db.transaction(async () => {
             const prior = (await list('releases', res)).find(r => r.sourceDraftId === d.id && r.approvalRequestId === approvalRequestId);
             if (prior)
@@ -374,28 +403,9 @@ export function createApp(options: {
             const fresh = await get('drafts', d.id, res);
             if (fresh.revision !== expectedRevision || fresh.status !== 'editing')
                 fail(409, 'REVISION_CONFLICT');
-            const audioAssets: Doc[] = [];
-            const learner = await get('learners', d.learnerId, res);
-            const audioGuidance = (fresh.audioGuidance ?? learner.preferences.audioGuidance) === true;
-            const displayMode = fresh.displayMode ?? 'photo_text';
-            if (audioGuidance) {
-                try {
-                    for (const s of steps) {
-                        const audio = await tts.synthesize(s.text);
-                        if (!audio.bytes.length || audio.mimeType !== 'audio/wav' || !Number.isFinite(audio.durationMs) || audio.durationMs <= 0)
-                            throw Error('INVALID_TTS_AUDIO');
-                        const a = doc(d.orgId, {
-                            kind: 'audio', objectPath: `approved/${d.orgId}/${releaseId}/${id()}.wav`,
-                            generation: 1, mimeType: audio.mimeType, durationMs: audio.durationMs,
-                            visibility: 'approved', releaseId
-                        });
-                        await storage.put(a.objectPath, audio.bytes);
-                        audioAssets.push(a);
-                    }
-                } catch {
-                    fail(502, 'TTS_GENERATION_FAILED');
-                }
-            }
+            const currentLearner = await get('learners', d.learnerId, res);
+            if ((currentLearner.preferences.audioGuidance === true) !== (learner.preferences.audioGuidance === true))
+                fail(409, 'REVISION_CONFLICT');
             const learnerSteps = steps.map((s, i) => ({
                 stepId: s.stepId, order: i + 1, imageAssetId: assets[i].id, imageAltText: s.imageAltText?.trim() || s.text, ...(audioAssets[i] ? { audioAssetId: audioAssets[i].id } : {}), text: s.text, visibleCaution: s.visibleCaution
             }));
